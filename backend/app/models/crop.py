@@ -1,4 +1,4 @@
-from datetime import date, datetime
+﻿from datetime import date, datetime
 
 from sqlalchemy import Date, DateTime, Integer, Numeric, String, func
 from sqlalchemy.orm import Mapped, mapped_column
@@ -18,7 +18,22 @@ class Crop(Base):
     cultivation_date: Mapped[date] = mapped_column(Date, nullable=False)
     expected_harvest_date: Mapped[date] = mapped_column(Date, nullable=False)
     location: Mapped[str] = mapped_column(String(200), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    blockchain_crop_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    blockchain_tx_hash: Mapped[str | None] = mapped_column(String(66), nullable=True, index=True)
+    blockchain_contract_address: Mapped[str | None] = mapped_column(String(42), nullable=True)
+    blockchain_block_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    blockchain_farmer_address: Mapped[str | None] = mapped_column(String(42), nullable=True)
+    blockchain_chain_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
     )
