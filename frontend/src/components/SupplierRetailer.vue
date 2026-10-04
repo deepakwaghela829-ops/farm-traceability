@@ -16,10 +16,31 @@ import {
   GANACHE_RPC,
 } from '../supplierRetailerService'
 
-// Search state
-const searchCropId = ref<string>('')
+// Search & initialization state
+const searchCropId = ref<string | number>('')
 const loadingCrop = ref<boolean>(false)
 const cropError = ref<string>('')
+const initError = ref<string>('')
+
+// Sanitized & normalized Crop ID string
+const normalizedCropId = computed<string>(() => {
+  if (searchCropId.value === null || searchCropId.value === undefined) return ''
+  return String(searchCropId.value).trim()
+})
+
+// Parsed integer Crop ID if valid positive integer, otherwise null
+const parsedCropId = computed<number | null>(() => {
+  const val = normalizedCropId.value
+  if (!val) return null
+  const num = Number(val)
+  return !isNaN(num) && Number.isInteger(num) && num > 0 ? num : null
+})
+
+// Whether the Load Crop button should be enabled
+const canLoadCrop = computed<boolean>(() => {
+  return parsedCropId.value !== null && !loadingCrop.value
+})
+
 
 // Loaded data
 const crop = ref<CropDetails | null>(null)
@@ -92,6 +113,7 @@ const isTransferValid = computed<boolean>(() => {
 // Load Ganache accounts
 async function loadAccountsList() {
   loadingAccounts.value = true
+  initError.value = ''
   try {
     const list = await fetchGanacheAccounts()
     accounts.value = list
@@ -99,7 +121,7 @@ async function loadAccountsList() {
       selectedAccount.value = list[0].address
     }
   } catch (err: any) {
-    cropError.value = err?.message || 'Failed to load Ganache accounts.'
+    initError.value = err?.message || 'Failed to load Ganache accounts.'
   } finally {
     loadingAccounts.value = false
   }
@@ -111,25 +133,27 @@ async function handleLoadCrop() {
   transferError.value = ''
   transferSuccess.value = null
 
-  const id = searchCropId.value.trim()
-  if (!id) {
-    cropError.value = 'Please enter a valid Crop ID.'
+  const validId = parsedCropId.value
+  if (validId === null) {
+    cropError.value = 'Please enter a valid positive integer Crop ID (e.g. 1).'
     return
   }
 
   loadingCrop.value = true
   try {
-    const result = await loadCrop(id)
+    const result = await loadCrop(validId)
     crop.value = result.crop
     movements.value = result.movements
     dbTransactions.value = result.dbTransactions
 
     // If selectedAccount is not the current holder, auto-select current holder if it's in accounts
-    const matchingAccount = accounts.value.find(
-      (a) => a.address.toLowerCase() === result.crop.currentHolder.toLowerCase(),
-    )
-    if (matchingAccount) {
-      selectedAccount.value = matchingAccount.address
+    if (result.crop?.currentHolder && accounts.value.length) {
+      const matchingAccount = accounts.value.find(
+        (a) => a.address.toLowerCase() === result.crop.currentHolder.toLowerCase(),
+      )
+      if (matchingAccount) {
+        selectedAccount.value = matchingAccount.address
+      }
     }
   } catch (err: any) {
     crop.value = null
@@ -280,14 +304,23 @@ onMounted(async () => {
       <div class="header-nav">
         <a href="/" class="nav-chip">🌾 Farmer Portal</a>
         <a href="/consumer.html" class="nav-chip">🔍 Consumer Portal</a>
-        <div class="network-badge">
-          <span class="dot"></span>
-          Ganache 1337
+        <a href="/ai-price-prediction.html" class="nav-chip">🤖 AI Price Prediction</a>
+        <div class="network-badge" :class="{ 'network-error': !!initError }">
+          <span class="dot" :class="{ 'dot-error': !!initError }"></span>
+          {{ accounts.length > 0 ? `Ganache (${accounts.length} accounts)` : (loadingAccounts ? 'Connecting Ganache...' : 'Ganache Disconnected') }}
         </div>
       </div>
     </header>
 
     <main class="content">
+      <!-- Initialization Error Alert -->
+      <div v-if="initError" class="alert error init-error">
+        <div><strong>Blockchain Connection Warning:</strong> {{ initError }}</div>
+        <button type="button" class="retry-btn" :disabled="loadingAccounts" @click="loadAccountsList">
+          {{ loadingAccounts ? 'Connecting...' : '↻ Retry Connection' }}
+        </button>
+      </div>
+
       <!-- Section 1: Find Crop Search Card -->
       <section class="hero-card search-hero">
         <div class="hero-text">
@@ -315,7 +348,7 @@ onMounted(async () => {
           <button
             type="submit"
             class="action-btn"
-            :disabled="loadingCrop || !searchCropId.trim()"
+            :disabled="!canLoadCrop"
           >
             <span v-if="loadingCrop" class="spinner"></span>
             <span>{{ loadingCrop ? 'Loading...' : 'Load Crop' }}</span>
@@ -890,6 +923,41 @@ onMounted(async () => {
   color: white;
   display: flex;
   align-items: center;
+}
+
+.network-badge.network-error {
+  border-color: rgba(239, 68, 68, 0.4);
+  background: rgba(239, 68, 68, 0.15);
+  color: #fca5a5;
+}
+
+.dot.dot-error {
+  background: #ef4444;
+}
+
+.init-error {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.retry-btn {
+  padding: 6px 14px;
+  background: #991b1b;
+  color: white;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.retry-btn:hover:not(:disabled) {
+  background: #7f1d1d;
 }
 
 .search-hero {
