@@ -185,7 +185,7 @@ async function submitCrop() {
     return
   }
 
-  if (!registry || !farmerAddress.value) {
+  if (!farmerAddress.value) {
     error.value =
       'Blockchain is not connected. Make sure Ganache is running.'
     return
@@ -194,7 +194,22 @@ async function submitCrop() {
   loading.value = true
 
   try {
-    // 1. Register crop on Ethereum / Ganache
+    if (!provider) {
+      provider = new ethers.JsonRpcProvider(GANACHE_RPC)
+    }
+
+    // 1. Determine the actual Farmer signer address
+    const currentSigner = await provider.getSigner(farmerAddress.value)
+    const signerAddress = await currentSigner.getAddress()
+
+    // 2. Query the current pending nonce directly from the Ganache provider
+    const pendingNonce = await provider.getTransactionCount(signerAddress, 'pending')
+
+    // 3. Ensure contract instance is connected with fresh signer without stale cached state
+    signer = currentSigner
+    registry = new ethers.Contract(contractAddress, abi, currentSigner)
+
+    // 4. Register crop on Ethereum / Ganache with current pending nonce override
     const tx = await registry.registerCrop(
       form.crop_name.trim(),
       form.crop_type.trim(),
@@ -203,20 +218,24 @@ async function submitCrop() {
       unixDate(form.cultivation_date),
       unixDate(form.expected_harvest_date),
       form.location.trim(),
+      { nonce: pendingNonce },
     )
 
     message.value = 'Transaction submitted to Ganache...'
 
-    // 2. Wait for blockchain confirmation
+    // 5. Wait for blockchain confirmation
     const receipt = await tx.wait()
+    if (!receipt) {
+      throw new Error('Transaction confirmation failed: receipt not found.')
+    }
 
-    // 3. Read the newly created blockchain crop ID
-    const ids = await registry.getFarmerCrops(farmerAddress.value)
+    // 6. Read the newly created blockchain crop ID
+    const ids = await registry.getFarmerCrops(signerAddress)
 
     const cropId =
       ids[ids.length - 1]?.toString() ?? 'unknown'
 
-    // 4. Save the same crop + blockchain metadata in PostgreSQL
+    // 7. Save the same crop + blockchain metadata in PostgreSQL
     await createCrop({
       farmer_id: FARMER_ID,
       crop_name: form.crop_name.trim(),
@@ -231,11 +250,11 @@ async function submitCrop() {
       blockchain_tx_hash: tx.hash,
       blockchain_contract_address: contractAddress,
       blockchain_block_number: receipt.blockNumber,
-      blockchain_farmer_address: farmerAddress.value,
+      blockchain_farmer_address: signerAddress,
       blockchain_chain_id: Number(REQUIRED_CHAIN_ID),
     })
 
-    // 5. Show complete success message
+    // 8. Show complete success message
     message.value =
       `Crop #${cropId} registered successfully. ` +
       `Blockchain block: ${receipt.blockNumber}. ` +
@@ -244,7 +263,7 @@ async function submitCrop() {
 
     resetForm()
 
-    // 6. Refresh blockchain records
+    // 9. Refresh blockchain records
     await loadCrops()
   } catch (err) {
     error.value =
