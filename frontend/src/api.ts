@@ -1,4 +1,5 @@
 import type { CropPayload, CropRecord } from './types'
+export type { CropPayload, CropRecord }
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, '')
 
@@ -38,4 +39,27 @@ export async function fetchCrops(farmerId: string): Promise<CropRecord[]> {
   )
 
   return parseResponse<CropRecord[]>(response)
+}
+
+export interface PricePredictionPayload {
+  crop_type: string
+  historical_price: number
+  season: string
+  location: string
+  demand: number
+  production_quantity: number
+}
+
+export interface PricePredictionResult {
+  predicted_price: number
+}
+
+export async function predictCropPrice(payload: PricePredictionPayload): Promise<PricePredictionResult> {
+  const response = await fetch(`${API_BASE_URL}/api/prediction/price`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+
+  return parseResponse<PricePredictionResult>(response)
 }

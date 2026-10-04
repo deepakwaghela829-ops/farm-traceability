@@ -24,3 +24,6 @@ Thumbs.db
 # Generated files
 frontend/src/*.js
 
+
+blockchain/artifacts/
+blockchain/cache/
