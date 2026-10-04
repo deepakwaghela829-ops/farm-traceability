@@ -1,7 +1,10 @@
 import type { CropPayload, CropRecord } from './types'
 export type { CropPayload, CropRecord }
 
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, '')
+const API_BASE_URL = (
+  import.meta.env.VITE_API_BASE_URL ||
+  'https://farm-traceability-backend.vercel.app'
+).replace(/\/$/, '')
 
 export type BlockchainCropPayload = CropPayload & {
   blockchain_crop_id?: number
