@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes.crops import router as crops_router
+from app.api.routes.transactions import router as transactions_router
 from app.config import get_settings
 
 settings = get_settings()
@@ -21,6 +22,7 @@ app.add_middleware(
 )
 
 app.include_router(crops_router)
+app.include_router(transactions_router)
 
 
 @app.get("/health")
