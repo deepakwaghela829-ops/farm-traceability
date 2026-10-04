@@ -19,6 +19,7 @@ export default defineConfig({
         main: fileURLToPath(new URL('./index.html', import.meta.url)),
         consumer: fileURLToPath(new URL('./consumer.html', import.meta.url)),
         supplier: fileURLToPath(new URL('./supplier-retailer.html', import.meta.url)),
+        prediction: fileURLToPath(new URL('./ai-price-prediction.html', import.meta.url)),
       },
     },
   },
