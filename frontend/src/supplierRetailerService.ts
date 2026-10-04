@@ -1,11 +1,11 @@
-import { ethers } from 'ethers'
+﻿import { ethers } from 'ethers'
 import abi from './blockchain/CropRegistry.abi.json'
 import deploymentInfo from './blockchain/deployment-info.json'
 
 export const GANACHE_RPC = 'http://127.0.0.1:7545'
 export const REQUIRED_CHAIN_ID = 1337n
 export const CONTRACT_ADDRESS: string = deploymentInfo.contractAddress
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, '')
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'https://farm-traceability-backend.vercel.app').replace(/\/$/, '')
 
 export interface CropDetails {
   cropId: number
@@ -355,3 +355,4 @@ export async function fetchDbTransactions(cropId: number): Promise<DbTransaction
   }
   return response.json()
 }
+

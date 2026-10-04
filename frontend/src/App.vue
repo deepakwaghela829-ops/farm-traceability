@@ -1,9 +1,13 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ethers } from 'ethers'
 import { createCrop } from './api'
+import type { CropPayload, CropRecord } from './types'
 import abi from './blockchain/CropRegistry.abi.json'
 import deploymentInfo from './blockchain/deployment-info.json'
+
+const DEMO_FARMER_ID = 'DEMO-FARMER-001'
+const GANACHE_RPC = 'http://127.0.0.1:7545'
 
 type BlockchainCrop = {
   cropId: string
@@ -18,11 +22,8 @@ type BlockchainCrop = {
   createdAt: string
 }
 
-const GANACHE_RPC = 'http://127.0.0.1:7545'
-const REQUIRED_CHAIN_ID = 1337n
-const FARMER_ID = 'DEMO-FARMER-001'
-
-const form = reactive({
+const form = reactive<CropPayload>({
+  farmer_id: DEMO_FARMER_ID,
   crop_name: '',
   crop_type: '',
   quantity: 0,
@@ -35,30 +36,39 @@ const form = reactive({
 const crops = ref<BlockchainCrop[]>([])
 const loading = ref(false)
 const loadingRecords = ref(false)
-const connecting = ref(false)
+const connectingWallet = ref(false)
 const message = ref('')
 const error = ref('')
-const farmerAddress = ref('')
+const walletAddress = ref('')
 
 let provider: ethers.JsonRpcProvider | null = null
 let signer: ethers.JsonRpcSigner | null = null
 let registry: ethers.Contract | null = null
 
 const contractAddress = deploymentInfo.contractAddress
+const requiredChainId = BigInt(deploymentInfo.chainId)
+
+const farmerAddress = walletAddress
+const connecting = connectingWallet
+
+const shortWallet = computed(() => {
+  if (!walletAddress.value) return 'Ganache not connected'
+  return `${walletAddress.value.slice(0, 6)}...${walletAddress.value.slice(-4)}`
+})
 
 const formValid = computed(() => {
   const quantity = Number(form.quantity)
 
   return (
-    !!form.crop_name.trim() &&
-    !!form.crop_type.trim() &&
+    form.crop_name.trim() &&
+    form.crop_type.trim() &&
     quantity > 0 &&
     Number.isInteger(quantity) &&
-    !!form.unit.trim() &&
-    !!form.cultivation_date &&
-    !!form.expected_harvest_date &&
+    form.unit.trim() &&
+    form.cultivation_date &&
+    form.expected_harvest_date &&
     form.expected_harvest_date >= form.cultivation_date &&
-    !!form.location.trim()
+    form.location.trim()
   )
 })
 
@@ -89,52 +99,44 @@ function dateFromUnix(value: bigint | string) {
 async function connectGanache() {
   message.value = ''
   error.value = ''
-  connecting.value = true
+  connectingWallet.value = true
 
   try {
     provider = new ethers.JsonRpcProvider(GANACHE_RPC)
 
     const network = await provider.getNetwork()
 
-    if (network.chainId !== REQUIRED_CHAIN_ID) {
+    if (network.chainId !== requiredChainId) {
       throw new Error(
-        `Wrong blockchain network. Expected chain ID 1337, got ${network.chainId}.`,
+        `Wrong blockchain network. Expected chain ID ${requiredChainId.toString()}, got ${network.chainId.toString()}.`,
       )
     }
 
     const accounts = await provider.send('eth_accounts', [])
 
     if (!accounts.length) {
-      throw new Error(
-        'No Ganache accounts were found. Make sure Ganache is running.',
-      )
+      throw new Error('No Ganache accounts found. Make sure Ganache is running.')
     }
 
-    farmerAddress.value = accounts[0]
-
+    walletAddress.value = accounts[0]
     signer = await provider.getSigner(accounts[0])
+    registry = new ethers.Contract(contractAddress, abi, signer)
 
-    registry = new ethers.Contract(
-      contractAddress,
-      abi,
-      signer,
-    )
-
-    message.value = `Connected to Ganache. Farmer account: ${farmerAddress.value}`
-
+    message.value = `Connected to Ganache: ${shortWallet.value}`
     await loadCrops()
   } catch (err) {
-    error.value =
-      err instanceof Error
-        ? err.message
-        : 'Unable to connect to Ganache.'
+    error.value = err instanceof Error ? err.message : 'Unable to connect to Ganache.'
   } finally {
-    connecting.value = false
+    connectingWallet.value = false
   }
 }
 
+async function connectWallet() {
+  await connectGanache()
+}
+
 async function loadCrops() {
-  if (!registry || !farmerAddress.value) {
+  if (!registry || !walletAddress.value) {
     crops.value = []
     return
   }
@@ -143,7 +145,7 @@ async function loadCrops() {
   error.value = ''
 
   try {
-    const ids = await registry.getFarmerCrops(farmerAddress.value)
+    const ids = await registry.getFarmerCrops(walletAddress.value)
 
     const records = await Promise.all(
       ids.map(async (id: bigint) => {
@@ -166,10 +168,7 @@ async function loadCrops() {
 
     crops.value = records
   } catch (err) {
-    error.value =
-      err instanceof Error
-        ? err.message
-        : 'Unable to load blockchain crop records.'
+    error.value = err instanceof Error ? err.message : 'Unable to load blockchain crop records.'
   } finally {
     loadingRecords.value = false
   }
@@ -180,36 +179,20 @@ async function submitCrop() {
   error.value = ''
 
   if (!formValid.value) {
-    error.value =
-      'Please complete all fields. Quantity must be a positive whole number.'
+    error.value = 'Please complete all fields and check the crop dates and quantity.'
     return
   }
 
-  if (!farmerAddress.value) {
-    error.value =
-      'Blockchain is not connected. Make sure Ganache is running.'
+  if (!registry || !provider || !signer || !walletAddress.value) {
+    error.value = 'Ganache is not connected. Start Ganache and connect again.'
     return
   }
 
   loading.value = true
 
   try {
-    if (!provider) {
-      provider = new ethers.JsonRpcProvider(GANACHE_RPC)
-    }
+    const pendingNonce = await provider.getTransactionCount(walletAddress.value, 'pending')
 
-    // 1. Determine the actual Farmer signer address
-    const currentSigner = await provider.getSigner(farmerAddress.value)
-    const signerAddress = await currentSigner.getAddress()
-
-    // 2. Query the current pending nonce directly from the Ganache provider
-    const pendingNonce = await provider.getTransactionCount(signerAddress, 'pending')
-
-    // 3. Ensure contract instance is connected with fresh signer without stale cached state
-    signer = currentSigner
-    registry = new ethers.Contract(contractAddress, abi, currentSigner)
-
-    // 4. Register crop on Ethereum / Ganache with current pending nonce override
     const tx = await registry.registerCrop(
       form.crop_name.trim(),
       form.crop_type.trim(),
@@ -221,23 +204,15 @@ async function submitCrop() {
       { nonce: pendingNonce },
     )
 
-    message.value = 'Transaction submitted to Ganache...'
+    message.value = 'Transaction submitted to Ganache. Waiting for confirmation...'
 
-    // 5. Wait for blockchain confirmation
     const receipt = await tx.wait()
-    if (!receipt) {
-      throw new Error('Transaction confirmation failed: receipt not found.')
-    }
 
-    // 6. Read the newly created blockchain crop ID
-    const ids = await registry.getFarmerCrops(signerAddress)
+    const ids = await registry.getFarmerCrops(walletAddress.value)
+    const cropId = ids[ids.length - 1]?.toString() ?? 'unknown'
 
-    const cropId =
-      ids[ids.length - 1]?.toString() ?? 'unknown'
-
-    // 7. Save the same crop + blockchain metadata in PostgreSQL
     await createCrop({
-      farmer_id: FARMER_ID,
+      farmer_id: DEMO_FARMER_ID,
       crop_name: form.crop_name.trim(),
       crop_type: form.crop_type.trim(),
       quantity: Number(form.quantity),
@@ -245,31 +220,21 @@ async function submitCrop() {
       cultivation_date: form.cultivation_date,
       expected_harvest_date: form.expected_harvest_date,
       location: form.location.trim(),
-
       blockchain_crop_id: Number(cropId),
       blockchain_tx_hash: tx.hash,
       blockchain_contract_address: contractAddress,
       blockchain_block_number: receipt.blockNumber,
-      blockchain_farmer_address: signerAddress,
-      blockchain_chain_id: Number(REQUIRED_CHAIN_ID),
+      blockchain_farmer_address: walletAddress.value,
+      blockchain_chain_id: Number(requiredChainId),
     })
 
-    // 8. Show complete success message
     message.value =
-      `Crop #${cropId} registered successfully. ` +
-      `Blockchain block: ${receipt.blockNumber}. ` +
-      `PostgreSQL synced. ` +
-      `Tx: ${tx.hash}`
+      `Crop #${cropId} registered on blockchain. Block ${receipt.blockNumber}. Tx: ${tx.hash}`
 
     resetForm()
-
-    // 9. Refresh blockchain records
     await loadCrops()
   } catch (err) {
-    error.value =
-      err instanceof Error
-        ? err.message
-        : 'Unable to register and save crop.'
+    error.value = err instanceof Error ? err.message : 'Unable to register crop on blockchain.'
   } finally {
     loading.value = false
   }
@@ -283,14 +248,16 @@ function formatDate(value: string) {
   }).format(new Date(`${value}T00:00:00`))
 }
 
-onMounted(connectGanache)
+onMounted(async () => {
+  await connectGanache()
+})
 </script>
 
 <template>
   <div class="app-shell">
     <header class="topbar">
       <div>
-        <span class="eyebrow">FARM TRACEABILITY · FARMER MODULE</span>
+        <span class="eyebrow">FARM TRACEABILITY Â· FARMER MODULE</span>
         <h1>Crop Entry</h1>
         <p>
           Record your crop information on Ethereum and sync it
@@ -610,3 +577,4 @@ onMounted(connectGanache)
     </main>
   </div>
 </template>
+
