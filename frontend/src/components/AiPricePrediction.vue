@@ -160,9 +160,7 @@ onMounted(() => {
       </div>
 
       <div class="header-nav">
-        <a href="/" class="nav-chip">Farmer App</a>
-        <a href="/consumer.html" class="nav-chip">Consumer Traceability</a>
-        <span class="nav-chip active">AI Price Prediction</span>
+        <span class="nav-chip active">AI Mandi Price Prediction</span>
       </div>
     </header>
 

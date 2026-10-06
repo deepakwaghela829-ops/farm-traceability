@@ -302,9 +302,6 @@ onMounted(async () => {
       </div>
 
       <div class="header-nav">
-        <a href="/" class="nav-chip">🌾 Farmer Portal</a>
-        <a href="/consumer.html" class="nav-chip">🔍 Consumer Portal</a>
-        <a href="/ai-price-prediction.html" class="nav-chip">🤖 AI Price Prediction</a>
         <div class="network-badge" :class="{ 'network-error': !!initError }">
           <span class="dot" :class="{ 'dot-error': !!initError }"></span>
           {{ accounts.length > 0 ? `Ganache (${accounts.length} accounts)` : (loadingAccounts ? 'Connecting Ganache...' : 'Ganache Disconnected') }}

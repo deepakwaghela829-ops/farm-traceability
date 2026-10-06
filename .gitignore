@@ -21,11 +21,9 @@ Thumbs.db
 .env
 .env.*
 !.env.example
-# Generated files
-frontend/src/*.js
-
+!backend/.env.example
 
 blockchain/artifacts/
 blockchain/cache/
 .vercel
-.env*
+

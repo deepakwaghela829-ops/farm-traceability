@@ -5,33 +5,47 @@ AgriTrace OS is an end-to-end, cryptographically verified agricultural supply ch
 
 ---
 
-## 1. System Architecture
+## 1. System Architecture (Role-Separated Portals & Layered Service Engine)
 
 ```text
-                ┌────────────────────────────────────────────────────────┐
-                │             Vue 3 + Vite Frontend (SPA)                │
-                │  (Dashboard · Crop Entry · Traceability · Custody · AI) │
-                └───────────────────────────┬────────────────────────────┘
-                                            │ HTTP / REST API (JWT)
-                                            ▼
-                ┌────────────────────────────────────────────────────────┐
-                │                  FastAPI Backend                       │
-                │    (Auth · Crops · Custody Transactions · ML API)      │
-                └──────────────┬─────────────────────────┬───────────────┘
-                               │                         │
-            Direct SQLAlchemy  │                         │ Scikit-Learn
-                               ▼                         ▼
-                ┌────────────────────────┐    ┌────────────────────────┐
-                │  PostgreSQL / Supabase │    │ Random Forest Regressor│
-                │  (Audited Relational)  │    │  (Fair Market Pricing) │
-                └────────────────────────┘    └────────────────────────┘
-                                            
-                               ▲ Ethers.js (Web3)
+                                  AGRITRACE OS
+                                       │
+                              ┌────────┴────────┐
+                              │  Authentication │
+                              │   JWT + RBAC    │
+                              └────────┬────────┘
+                                       │
+        ┌───────────────┬──────────────┼──────────────┬───────────────┐
+        │               │              │              │               │
+        ▼               ▼              ▼              ▼               ▼
+   FARMER PORTAL  SUPPLIER PORTAL RETAILER PORTAL CONSUMER PORTAL ADMIN PORTAL
+  (Crop Register, (Wholesale In,  (Inventory,     (Public Scan,   (Audit Logs,
+   AI Pricing)     Custody Trans)  Shelf Proven)   No Login Req)   User Mgmt)
+        │               │              │              │               │
+        └───────────────┴───────┬──────┴──────────────┘               │
+                                ▼                                     │
+                    ┌───────────────────────┐                         │
+                    │ FastAPI Service Layer │◄────────────────────────┘
+                    │   (/api/auth, /crops, │
+                    │   /txs, /prediction)  │
+                    └───────────┬───────────┘
+                                │
+        ┌───────────────────────┼───────────────────────┐
+        │                       │                       │
+        ▼                       ▼                       ▼
+ ┌──────────────┐       ┌──────────────┐       ┌─────────────────┐
+ │ Crop Service │       │ Custody/Tx   │       │ AI Price Engine │
+ │  Management  │       │ Traceability │       │  Random Forest  │
+ └──────┬───────┘       └──────┬───────┘       └────────┬────────┘
+        │                      │                        │
+        └──────────────────────┼────────────────────────┘
                                │
-                ┌────────────────────────────────────────────────────────┐
-                │          Ethereum EVM (Ganache Local Testnet)          │
-                │       CropRegistry.sol Smart Contract (Chain ID: 1337) │
-                └────────────────────────────────────────────────────────┘
+                ┌──────────────┴──────────────┐
+                ▼                             ▼
+   ┌────────────────────────┐    ┌────────────────────────┐
+   │ PostgreSQL / Supabase  │    │  Ganache EVM (1337)    │
+   │ Users, Crops, Audits   │    │  CropRegistry.sol      │
+   └────────────────────────┘    └────────────────────────┘
 ```
 
 ---
@@ -116,19 +130,19 @@ Open `http://localhost:5173` in your browser.
 
 ---
 
-## 6. One-Click Viva / Evaluation Accounts
+## 6. Demonstration / Viva Accounts
 
-The platform includes demo credentials configured for live viva demonstrations:
+The platform includes seeded accounts for role-based evaluation and viva demonstrations:
 
-| Username | Password | Role | Description |
+| Username | Default Password Convention | Role | Description |
 | :--- | :--- | :--- | :--- |
-| `farmer1` | `farmer123` | **FARMER** | Ramesh Patel (Lead Farmer, Palghar) |
-| `supplier1` | `supplier123` | **SUPPLIER** | Apex Agro Logistics |
-| `retailer1` | `retailer123` | **RETAILER** | FreshBazaar Organic Retail |
-| `consumer1` | `consumer123` | **CONSUMER** | Pooja Sharma (Public Consumer) |
-| `admin1` | `admin123` | **ADMIN** | System Auditor & Platform Admin |
+| `farmer1` | `<username>123` (e.g. `farmer123`) | **FARMER** | Ramesh Patel (Lead Farmer, Palghar) |
+| `supplier1` | `<username>123` (e.g. `supplier123`) | **SUPPLIER** | Apex Agro Logistics |
+| `retailer1` | `<username>123` (e.g. `retailer123`) | **RETAILER** | FreshBazaar Organic Retail |
+| `consumer1` | `<username>123` (e.g. `consumer123`) | **CONSUMER** | Pooja Sharma (Public Consumer) |
+| `admin1` | `<username>123` (e.g. `admin123`) | **ADMIN** | System Auditor & Platform Admin |
 
-*Note: Clicking "Browse as Public Consumer" or scanning any packaging QR code allows open verification without requiring a login.*
+*Note: Credentials are initialized locally via `backend/app/seed_demo_users.py`. Clicking "Browse as Public Consumer" or scanning any packaging QR code allows immediate open verification without requiring a login.*
 
 ---
 

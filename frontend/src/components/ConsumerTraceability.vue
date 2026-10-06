@@ -224,34 +224,6 @@ watch(
 
 <template>
   <div class="consumer-app app-shell">
-    <!-- Top Bar Header -->
-    <header class="topbar">
-      <div>
-        <span class="eyebrow">FARM TRACEABILITY · CONSUMER PORTAL</span>
-        <h1>Product Verification</h1>
-        <p>
-          Verify crop authenticity and trace the complete farm-to-table journey
-          directly from the Ethereum blockchain.
-        </p>
-      </div>
-
-      <div class="header-actions">
-        <a href="/" class="farmer-link" title="Switch to Farmer Portal">
-          🌾 Farmer Portal
-        </a>
-        <a href="/supplier-retailer.html" class="farmer-link" title="Supplier & Retailer">
-          🚚 Supplier / Retailer
-        </a>
-        <a href="/ai-price-prediction.html" class="farmer-link" title="AI Price Forecast">
-          🤖 AI Prediction
-        </a>
-        <div class="network-chip">
-          <span class="dot"></span>
-          Ganache 1337
-        </div>
-      </div>
-    </header>
-
     <main class="content">
       <!-- Search Verification Section -->
       <section class="hero-card search-card">
