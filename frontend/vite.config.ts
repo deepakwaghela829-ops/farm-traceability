@@ -1,6 +1,5 @@
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
-
 import { fileURLToPath } from 'node:url'
 
 export default defineConfig({
@@ -20,6 +19,19 @@ export default defineConfig({
         consumer: fileURLToPath(new URL('./consumer.html', import.meta.url)),
         supplier: fileURLToPath(new URL('./supplier-retailer.html', import.meta.url)),
         prediction: fileURLToPath(new URL('./ai-price-prediction.html', import.meta.url)),
+      },
+      output: {
+        manualChunks(id) {
+          if (id.includes('node_modules/ethers')) {
+            return 'vendor-ethers'
+          }
+          if (id.includes('node_modules/vue')) {
+            return 'vendor-vue'
+          }
+          if (id.includes('node_modules/qrcode')) {
+            return 'vendor-qrcode'
+          }
+        },
       },
     },
   },

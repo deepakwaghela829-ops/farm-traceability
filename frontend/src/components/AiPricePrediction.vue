@@ -1,7 +1,11 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { fetchCrops, predictCropPrice, fetchCropBenchmarks } from '../api'
 import type { CropRecord } from '../types'
+
+const props = defineProps<{
+  crops?: CropRecord[]
+}>()
 
 interface PredictionForm {
   crop_type: string
@@ -27,7 +31,7 @@ const errorMessage = ref('')
 const successMessage = ref('')
 
 // Optional registered crops for auto-fill
-const registeredCrops = ref<CropRecord[]>([])
+const registeredCrops = ref<CropRecord[]>(props.crops || [])
 const loadingCrops = ref(false)
 const selectedCropId = ref<string>('')
 
@@ -143,8 +147,21 @@ function formatCurrency(val: number) {
 }
 
 onMounted(() => {
-  loadRegisteredCrops()
+  if (props.crops && props.crops.length > 0) {
+    registeredCrops.value = props.crops
+  } else {
+    loadRegisteredCrops()
+  }
 })
+
+watch(
+  () => props.crops,
+  (newCrops) => {
+    if (newCrops && newCrops.length > 0) {
+      registeredCrops.value = newCrops
+    }
+  },
+)
 </script>
 
 <template>

@@ -17,6 +17,7 @@ import {
 } from '../supplierRetailerService'
 import type { CropRecord } from '../api'
 import type { UnifiedCropResolution } from '../cropIdentifierService'
+import CropDetailsModal from './CropDetailsModal.vue'
 
 const props = withDefaults(
   defineProps<{
@@ -29,6 +30,12 @@ const props = withDefaults(
     crops: () => [],
   },
 )
+
+const emit = defineEmits<{
+  (e: 'backToIncoming'): void
+}>()
+
+const showDetailsModal = ref(false)
 
 // Search & initialization state
 const searchCropId = ref<string | number>('')
@@ -400,28 +407,64 @@ watch(
       <!-- Provenance Resolution Banner: Database-Only Mode -->
       <div v-if="crop && cropResolution && cropResolution.status === 'DATABASE_VERIFIED_OFFCHAIN'" class="alert info-banner">
         <div class="info-banner-content">
-          <strong>📋 Database Record Found (DB #{{ cropResolution.databaseId }})</strong>
-          <p>{{ cropResolution.statusMessage }}</p>
-          <div class="id-pills-row">
-            <span class="pill-tag">PostgreSQL Primary Key: #{{ cropResolution.databaseId }}</span>
-            <span class="pill-tag offchain">Blockchain Status: {{ cropResolution.blockchainCropId ? `Token #${cropResolution.blockchainCropId} (Prior deployment/unreachable)` : 'Unminted (Off-Chain Catalog)' }}</span>
-            <span class="pill-tag verified">STATUS: DATABASE VERIFIED</span>
+          <div class="banner-title-line">
+            <span class="badge-status-title">DATABASE RECORD FOUND</span>
+            <span class="badge-status-sub">DATABASE VERIFIED — OFF-CHAIN</span>
+          </div>
+
+          <div class="meta-status-grid">
+            <div class="meta-row">
+              <span class="meta-k">Database Crop ID:</span>
+              <span class="meta-v">#{{ cropResolution.databaseId }}</span>
+            </div>
+            <div class="meta-row">
+              <span class="meta-k">Blockchain Crop ID:</span>
+              <span class="meta-v">{{ cropResolution.blockchainCropId ? `#${cropResolution.blockchainCropId}` : 'Not Available' }}</span>
+            </div>
+            <div class="meta-row full-span">
+              <span class="meta-k">Verification:</span>
+              <span class="meta-v highlight-amber">DATABASE VERIFIED — OFF-CHAIN</span>
+            </div>
+            <div class="meta-row full-span">
+              <span class="meta-k">Reason:</span>
+              <span class="meta-v">This crop does not currently have an associated on-chain registration.</span>
+            </div>
+          </div>
+
+          <div class="banner-action-buttons">
+            <button type="button" class="btn-banner-action" @click="showDetailsModal = true">
+              🔍 View Details
+            </button>
+            <button type="button" class="btn-banner-action" :disabled="loadingCrop" @click="handleLoadCrop()">
+              {{ loadingCrop ? 'Verifying...' : '↻ Refresh' }}
+            </button>
+            <button type="button" class="btn-banner-action back-btn" @click="emit('backToIncoming')">
+              ← Back to Incoming Crops
+            </button>
           </div>
         </div>
-        <button type="button" class="retry-btn" :disabled="loadingCrop" @click="handleLoadCrop()">
-          {{ loadingCrop ? 'Verifying...' : '↻ Refresh Blockchain' }}
-        </button>
       </div>
 
       <!-- Provenance Resolution Banner: On-Chain Verified Mode -->
       <div v-if="crop && cropResolution && cropResolution.status === 'ON_CHAIN_VERIFIED'" class="alert success-banner">
         <div class="success-banner-content">
-          <strong>🛡️ Cryptographically Verified On-Chain (Blockchain #{{ cropResolution.blockchainCropId }})</strong>
-          <p>Settled on Ethereum Ganache (Chain ID 1337). Smart contract state verified and active.</p>
-          <div class="id-pills-row">
-            <span class="pill-tag">PostgreSQL DB: #{{ cropResolution.databaseId || 'Synced' }}</span>
-            <span class="pill-tag onchain">On-Chain Token: #{{ cropResolution.blockchainCropId }}</span>
-            <span class="pill-tag verified-green">STATUS: ON-CHAIN VERIFIED</span>
+          <div class="banner-title-line">
+            <span class="badge-status-title-green">DATABASE + BLOCKCHAIN VERIFIED</span>
+            <span class="badge-status-sub-green">FULLY SYNCHRONIZED</span>
+          </div>
+          <div class="meta-status-grid">
+            <div class="meta-row">
+              <span class="meta-k">Database Crop ID:</span>
+              <span class="meta-v">#{{ cropResolution.databaseId || 'Synced' }}</span>
+            </div>
+            <div class="meta-row">
+              <span class="meta-k">Blockchain Crop ID:</span>
+              <span class="meta-v">#{{ cropResolution.blockchainCropId }}</span>
+            </div>
+            <div class="meta-row full-span">
+              <span class="meta-k">Verification:</span>
+              <span class="meta-v highlight-emerald">Settled on Ethereum Ganache (Chain ID 1337). Smart contract state verified and active.</span>
+            </div>
           </div>
         </div>
       </div>
@@ -999,6 +1042,12 @@ watch(
         </div>
       </section>
     </main>
+    <!-- Crop Details Inspection Modal -->
+    <CropDetailsModal
+      v-if="showDetailsModal && (cropResolution?.databaseId || crop?.cropId)"
+      :crop-id="cropResolution?.databaseId || crop!.cropId"
+      @close="showDetailsModal = false"
+    />
   </div>
 </template>
 
@@ -1974,5 +2023,111 @@ watch(
   margin-bottom: 16px;
   font-size: 13px;
   line-height: 1.4;
+}
+
+/* Enhanced Provenance Banners */
+.banner-title-line {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.badge-status-title {
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  padding: 4px 10px;
+  background: rgba(245, 158, 11, 0.2);
+  color: #f59e0b;
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  border-radius: 6px;
+}
+.badge-status-sub {
+  font-size: 12px;
+  font-weight: 700;
+  color: #cbd5e1;
+}
+.badge-status-title-green {
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  padding: 4px 10px;
+  background: rgba(16, 185, 129, 0.2);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.4);
+  border-radius: 6px;
+}
+.badge-status-sub-green {
+  font-size: 12px;
+  font-weight: 700;
+  color: #a7f3d0;
+}
+.meta-status-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px 16px;
+  background: rgba(15, 23, 42, 0.6);
+  padding: 12px 16px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  margin-bottom: 14px;
+}
+.meta-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+.meta-row.full-span {
+  grid-column: 1 / -1;
+}
+.meta-k {
+  color: #94a3b8;
+  font-weight: 600;
+}
+.meta-v {
+  color: #f8fafc;
+  font-weight: 700;
+}
+.meta-v.highlight-amber {
+  color: #fbbf24;
+}
+.meta-v.highlight-emerald {
+  color: #34d399;
+}
+.banner-action-buttons {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.btn-banner-action {
+  background: #3b82f6;
+  color: #ffffff;
+  border: none;
+  padding: 7px 14px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.btn-banner-action:hover:not(:disabled) {
+  background: #2563eb;
+  transform: translateY(-1px);
+}
+.btn-banner-action:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.btn-banner-action.back-btn {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #e2e8f0;
+}
+.btn-banner-action.back-btn:hover {
+  background: rgba(255, 255, 255, 0.18);
+  color: #ffffff;
 }
 </style>

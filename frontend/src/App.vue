@@ -1,6 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
-import { ethers } from 'ethers'
+import { ref, onMounted, computed, defineAsyncComponent } from 'vue'
 import { 
   fetchCrops, 
   fetchCurrentUser,
@@ -8,16 +7,15 @@ import {
   type CropRecord, 
   type UserProfile
 } from './api'
-import deploymentInfo from './blockchain/deployment-info.json'
-import abi from './blockchain/CropRegistry.abi.json'
+import { quickCheckGanache, GANACHE_RPC, CONTRACT_ADDRESS, REQUIRED_CHAIN_ID } from './blockchainService'
 
-// Dedicated Role Portal Components
+// Dedicated Role Portal Components (Code Split via defineAsyncComponent)
 import LoginPage from './components/common/LoginPage.vue'
-import FarmerDashboard from './components/farmer/FarmerDashboard.vue'
-import SupplierDashboard from './components/supplier/SupplierDashboard.vue'
-import RetailerDashboard from './components/retailer/RetailerDashboard.vue'
-import ConsumerPortal from './components/consumer/ConsumerPortal.vue'
-import AdminDashboard from './components/admin/AdminDashboard.vue'
+const FarmerDashboard = defineAsyncComponent(() => import('./components/farmer/FarmerDashboard.vue'))
+const SupplierDashboard = defineAsyncComponent(() => import('./components/supplier/SupplierDashboard.vue'))
+const RetailerDashboard = defineAsyncComponent(() => import('./components/retailer/RetailerDashboard.vue'))
+const ConsumerPortal = defineAsyncComponent(() => import('./components/consumer/ConsumerPortal.vue'))
+const AdminDashboard = defineAsyncComponent(() => import('./components/admin/AdminDashboard.vue'))
 
 // Role & Session State
 type RoleType = 'FARMER' | 'SUPPLIER' | 'RETAILER' | 'CONSUMER' | 'ADMIN'
@@ -26,9 +24,8 @@ const authToken = ref<string>(localStorage.getItem('agritrace_token') || '')
 const isPublicGuest = ref<boolean>(false)
 
 // Blockchain Constants & Connection
-const GANACHE_RPC = 'http://127.0.0.1:7545'
-const contractAddress = deploymentInfo.contractAddress
-const requiredChainId = BigInt(deploymentInfo.chainId)
+const contractAddress = CONTRACT_ADDRESS
+const requiredChainId = REQUIRED_CHAIN_ID
 
 const walletAddress = ref('')
 const walletConnected = ref(false)
@@ -81,6 +78,9 @@ function handleLoginSuccess(data: { user: UserProfile; token: string }) {
 
   showToast(`Welcome back, ${data.user.full_name || data.user.username} (${data.user.role})!`, 'success')
 
+  loadCropRecords()
+  connectGanache()
+
   if (data.user.role === 'ADMIN') {
     loadSystemUsers()
   }
@@ -90,6 +90,8 @@ function handleLogout() {
   currentUser.value = null
   authToken.value = ''
   isPublicGuest.value = false
+  crops.value = []
+  systemUsers.value = []
   localStorage.removeItem('agritrace_token')
   window.location.hash = '#/login'
   showToast('Logged out successfully.', 'info')
@@ -133,19 +135,17 @@ async function loadSystemUsers() {
   }
 }
 
-// Blockchain connection
+// Blockchain connection (Lightweight JSON-RPC probe)
 async function connectGanache() {
   try {
-    const provider = new ethers.JsonRpcProvider(GANACHE_RPC)
-    const network = await provider.getNetwork()
-    if (network.chainId === requiredChainId) {
-      const accounts = await provider.send('eth_accounts', [])
-      if (accounts && accounts.length > 0) {
-        if (!walletAddress.value) {
-          walletAddress.value = accounts[0]
-        }
-        walletConnected.value = true
+    const res = await quickCheckGanache(GANACHE_RPC)
+    if (res.connected && res.accounts.length > 0) {
+      if (!walletAddress.value) {
+        walletAddress.value = res.accounts[0]
       }
+      walletConnected.value = true
+    } else {
+      walletConnected.value = false
     }
   } catch {
     walletConnected.value = false
@@ -242,10 +242,14 @@ function handleCropCreated(newCrop: CropRecord) {
 
 onMounted(async () => {
   await checkAuthSession()
-  await loadCropRecords()
-  await connectGanache()
   handleHashRoute()
   window.addEventListener('hashchange', handleHashRoute)
+
+  // Only load crops and connect Ganache if authenticated in an internal role
+  if (currentUser.value) {
+    loadCropRecords()
+    connectGanache()
+  }
 })
 </script>
 

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { reactive, ref, computed } from 'vue'
-import { ethers } from 'ethers'
+import { getSharedProvider, getEthers } from '../blockchainService'
 import { createCrop, type BlockchainCropPayload } from '../api'
 import abi from '../blockchain/CropRegistry.abi.json'
 
@@ -67,7 +67,7 @@ async function submitCrop() {
     // 1. If Ganache wallet is connected, execute smart contract transaction on Ethereum first!
     if (props.walletAddress && props.contractAddress) {
       statusNote.value = 'Broadcasting transaction to Ganache EVM smart contract...'
-      const provider = new ethers.JsonRpcProvider('http://127.0.0.1:7545')
+      const [provider, { ethers }] = await Promise.all([getSharedProvider(), getEthers()])
       const signer = await provider.getSigner(props.walletAddress)
       const registry = new ethers.Contract(props.contractAddress, abi, signer)
 

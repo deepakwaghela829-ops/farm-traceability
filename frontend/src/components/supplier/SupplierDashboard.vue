@@ -292,6 +292,7 @@ function handleTraceCrop(cropId: number | string) {
         :initial-crop-id="selectedCustodyCropId"
         :crops="crops"
         role="SUPPLIER"
+        @back-to-incoming="activeNav = 'incoming'"
       />
     </div>
 

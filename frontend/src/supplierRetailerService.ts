@@ -1,14 +1,18 @@
-import { ethers } from 'ethers'
 import abi from './blockchain/CropRegistry.abi.json'
-import deploymentInfo from './blockchain/deployment-info.json'
+import {
+  getEthers,
+  getSharedProvider,
+  getSharedReadOnlyContract,
+  GANACHE_RPC,
+  REQUIRED_CHAIN_ID,
+  CONTRACT_ADDRESS,
+} from './blockchainService'
 import {
   resolveCropProvenance,
   type UnifiedCropResolution,
 } from './cropIdentifierService'
 
-export const GANACHE_RPC = 'http://127.0.0.1:7545'
-export const REQUIRED_CHAIN_ID = 1337n
-export const CONTRACT_ADDRESS: string = deploymentInfo.contractAddress
+export { GANACHE_RPC, REQUIRED_CHAIN_ID, CONTRACT_ADDRESS }
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000').replace(/\/$/, '')
 
 export interface CropDetails {
@@ -85,8 +89,8 @@ export function truncateAddress(address: string, lead = 6, tail = 4): string {
 /**
  * Connects to Ganache RPC provider and verifies chain ID 1337.
  */
-export async function getProvider(): Promise<ethers.JsonRpcProvider> {
-  const provider = new ethers.JsonRpcProvider(GANACHE_RPC)
+export async function getProvider(): Promise<any> {
+  const provider = await getSharedProvider(GANACHE_RPC)
   try {
     const network = await provider.getNetwork()
     if (network.chainId !== REQUIRED_CHAIN_ID) {
@@ -109,7 +113,7 @@ export async function getProvider(): Promise<ethers.JsonRpcProvider> {
  * Retrieves all unlocked Ganache accounts and their ETH balances.
  */
 export async function fetchGanacheAccounts(): Promise<GanacheAccount[]> {
-  const provider = await getProvider()
+  const [provider, { ethers }] = await Promise.all([getProvider(), getEthers()])
   const addresses: string[] = await provider.send('eth_accounts', [])
   if (!addresses.length) {
     throw new Error('No Ganache accounts found. Make sure Ganache is running with unlocked accounts.')
@@ -170,6 +174,8 @@ export async function executeTransfer(
     throw new Error('Destination wallet address cannot be empty.')
   }
 
+  const { ethers } = await getEthers()
+
   if (!ethers.isAddress(destClean)) {
     throw new Error('Destination wallet address is not a valid Ethereum address.')
   }
@@ -183,8 +189,10 @@ export async function executeTransfer(
     throw new Error('Please select a destination role (Supplier or Retailer).')
   }
 
-  const provider = await getProvider()
-  const contractForCheck = new ethers.Contract(CONTRACT_ADDRESS, abi, provider)
+  const [provider, contractForCheck] = await Promise.all([
+    getProvider(),
+    getSharedReadOnlyContract(),
+  ])
 
   // 2. Verify current on-chain holder
   const currentOnChainHolder: string = await contractForCheck.getCurrentHolder(BigInt(cropId))
@@ -198,7 +206,7 @@ export async function executeTransfer(
   const signer = await provider.getSigner(signerAddress)
   const contract = new ethers.Contract(CONTRACT_ADDRESS, abi, signer)
 
-  let tx: ethers.ContractTransactionResponse
+  let tx: any
   try {
     tx = await contract.transferCrop(BigInt(cropId), destClean, roleClean)
   } catch (err: any) {
@@ -210,7 +218,7 @@ export async function executeTransfer(
   }
 
   // 4. Wait for blockchain confirmation
-  let receipt: ethers.ContractTransactionReceipt | null = null
+  let receipt: any = null
   try {
     receipt = await tx.wait()
     if (!receipt || receipt.status !== 1) {

@@ -1,6 +1,8 @@
-import { ethers } from 'ethers'
-import abi from './blockchain/CropRegistry.abi.json'
-import deploymentInfo from './blockchain/deployment-info.json'
+import {
+  getSharedReadOnlyContract,
+  CONTRACT_ADDRESS,
+  REQUIRED_CHAIN_ID,
+} from './blockchainService'
 import {
   fetchCropById,
   fetchCropTransactions,
@@ -13,9 +15,7 @@ import type {
   DbTransaction,
 } from './supplierRetailerService'
 
-export const GANACHE_RPC = 'http://127.0.0.1:7545'
-export const REQUIRED_CHAIN_ID = 1337n
-export const CONTRACT_ADDRESS: string = deploymentInfo.contractAddress
+export { CONTRACT_ADDRESS, REQUIRED_CHAIN_ID }
 
 export type CropProvenanceStatus =
   | 'ON_CHAIN_VERIFIED'
@@ -105,17 +105,6 @@ export async function resolveCropProvenance(
     dbCrop = null
   }
 
-  // 2. Setup Ganache Provider & Contract
-  let provider: ethers.JsonRpcProvider | null = null
-  let contract: ethers.Contract | null = null
-  try {
-    provider = new ethers.JsonRpcProvider(GANACHE_RPC)
-    contract = new ethers.Contract(CONTRACT_ADDRESS, abi, provider)
-  } catch {
-    provider = null
-    contract = null
-  }
-
   // Determine which on-chain ID to query on the smart contract
   // If dbCrop exists, USE ITS blockchain_crop_id (never assume dbCrop.crop_id == blockchain_crop_id)
   const targetOnChainId = dbCrop?.blockchain_crop_id ?? (dbCrop ? null : numericId)
@@ -126,19 +115,23 @@ export async function resolveCropProvenance(
   let movementsRaw: any[] = []
   let isHarvested = false
 
-  if (contract && targetOnChainId !== null && targetOnChainId > 0) {
+  // Only query the smart contract if a valid on-chain ID is expected
+  if (targetOnChainId !== null && targetOnChainId > 0) {
     try {
-      const [cData, holder, hist, harvested] = await Promise.all([
-        contract.getCrop(BigInt(targetOnChainId)),
-        contract.getCurrentHolder(BigInt(targetOnChainId)),
-        contract.getMovementHistory(BigInt(targetOnChainId)),
-        contract.harvested(BigInt(targetOnChainId)),
-      ])
-      cropData = cData
-      currentHolder = holder
-      movementsRaw = hist || []
-      isHarvested = Boolean(harvested)
-      onChainSuccess = true
+      const contract = await getSharedReadOnlyContract()
+      if (contract) {
+        const [cData, holder, hist, harvested] = await Promise.all([
+          contract.getCrop(BigInt(targetOnChainId)),
+          contract.getCurrentHolder(BigInt(targetOnChainId)),
+          contract.getMovementHistory(BigInt(targetOnChainId)),
+          contract.harvested(BigInt(targetOnChainId)),
+        ])
+        cropData = cData
+        currentHolder = holder
+        movementsRaw = hist || []
+        isHarvested = Boolean(harvested)
+        onChainSuccess = true
+      }
     } catch {
       onChainSuccess = false
     }

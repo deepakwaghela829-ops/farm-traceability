@@ -2,7 +2,6 @@
 import { resolveCropProvenance } from '../cropIdentifierService'
 import { computed, onMounted, ref, watch } from 'vue'
 import {
-  verifyCrop,
   formatDate,
   formatDateTime,
   truncateAddress,
