@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import {
   verifyCrop,
   formatDate,
@@ -11,6 +11,17 @@ import {
   CONTRACT_ADDRESS,
 } from '../consumerTraceability'
 
+import {
+  fetchCropPrediction,
+  acknowledgeForecast,
+  fetchAcknowledgement,
+  fetchCropById,
+  fetchCropTransactions,
+  type PricePredictionResult,
+} from '../api'
+
+import QRCodeGenerator from './QRCodeGenerator.vue'
+
 const props = defineProps<{
   initialCropId?: string | number
 }>()
@@ -20,6 +31,15 @@ const loading = ref<boolean>(false)
 const errorMessage = ref<string>('')
 const verifiedCrop = ref<VerifiedCrop | null>(null)
 const copiedAddress = ref<string | null>(null)
+
+// AI Price Forecast states
+const aiPrediction = ref<PricePredictionResult | null>(null)
+const loadingPrediction = ref<boolean>(false)
+const predictionError = ref<string>('')
+const ackChecked = ref<boolean>(false)
+const isAcknowledged = ref<boolean>(false)
+const ackSubmitting = ref<boolean>(false)
+const ackSuccessMsg = ref<string>('')
 
 // Find supplier movement if present
 const supplierMovement = computed<MovementRecord | undefined>(() => {
@@ -59,11 +79,52 @@ const currentHolderRole = computed<string>(() => {
   return 'Authorized Custodian'
 })
 
+async function loadAiPrediction(cropId: string | number) {
+  loadingPrediction.value = true
+  predictionError.value = ''
+  aiPrediction.value = null
+  ackChecked.value = false
+  isAcknowledged.value = false
+  ackSuccessMsg.value = ''
+
+  try {
+    const pred = await fetchCropPrediction(cropId)
+    aiPrediction.value = pred
+
+    // Check if previously acknowledged
+    const prevAck = await fetchAcknowledgement(cropId)
+    if (prevAck && prevAck.acknowledged) {
+      isAcknowledged.value = true
+      ackChecked.value = true
+    }
+  } catch (err: any) {
+    predictionError.value =
+      err instanceof Error ? err.message : 'Unable to load AI price forecast.'
+  } finally {
+    loadingPrediction.value = false
+  }
+}
+
+async function handleAcknowledge() {
+  if (!verifiedCrop.value || !ackChecked.value) return
+  ackSubmitting.value = true
+  ackSuccessMsg.value = ''
+  try {
+    await acknowledgeForecast(verifiedCrop.value.cropId)
+    isAcknowledged.value = true
+    ackSuccessMsg.value = 'AI forecast acknowledged and recorded successfully.'
+  } catch (err: any) {
+    ackSuccessMsg.value = ''
+  } finally {
+    ackSubmitting.value = false
+  }
+}
+
 async function handleVerify() {
   errorMessage.value = ''
   verifiedCrop.value = null
 
-  const input = cropIdInput.value.trim()
+  const input = cropIdInput.value.trim().replace(/^#/, '')
   if (!input) {
     errorMessage.value = 'Please enter a Crop ID to verify.'
     return
@@ -72,11 +133,53 @@ async function handleVerify() {
   loading.value = true
 
   try {
+    // 1. Try smart contract verification first
     const result = await verifyCrop(input)
     verifiedCrop.value = result
+    loadAiPrediction(result.cropId)
   } catch (err: any) {
+    // 2. If smart contract fails, gracefully check the PostgreSQL database
+    try {
+      const dbCrop = await fetchCropById(input)
+      if (dbCrop) {
+        const txs = await fetchCropTransactions(dbCrop.blockchain_crop_id || dbCrop.crop_id).catch(() => [])
+        const movements: MovementRecord[] = txs.map(t => ({
+          from: t.from_address,
+          to: t.to_address,
+          toRole: t.role,
+          timestamp: Math.floor(new Date(t.timestamp).getTime() / 1000)
+        }))
+
+        const cultUnix = Math.floor(new Date(`${dbCrop.cultivation_date}T00:00:00`).getTime() / 1000)
+        const harvUnix = Math.floor(new Date(`${dbCrop.expected_harvest_date}T00:00:00`).getTime() / 1000)
+        const isHarvestedNow = new Date(`${dbCrop.expected_harvest_date}T00:00:00`) <= new Date()
+
+        verifiedCrop.value = {
+          cropId: String(dbCrop.blockchain_crop_id || dbCrop.crop_id),
+          farmer: dbCrop.blockchain_farmer_address || dbCrop.farmer_id,
+          cropName: dbCrop.crop_name,
+          cropType: dbCrop.crop_type,
+          quantity: String(dbCrop.quantity),
+          unit: dbCrop.unit,
+          cultivationDate: cultUnix,
+          expectedHarvestDate: harvUnix,
+          location: dbCrop.location,
+          createdAt: cultUnix,
+          isHarvested: isHarvestedNow,
+          harvestTimestamp: harvUnix,
+          currentHolder: movements.length > 0 ? movements[movements.length - 1].to : (dbCrop.blockchain_farmer_address || dbCrop.farmer_id),
+          movements
+        }
+
+        loadAiPrediction(dbCrop.blockchain_crop_id || dbCrop.crop_id)
+        return
+      }
+    } catch {
+      // Fallback to error message
+    }
+
     errorMessage.value =
-      err instanceof Error ? err.message : 'Unable to verify crop.'
+      err instanceof Error ? err.message : 'Unable to verify crop provenance.'
   } finally {
     loading.value = false
   }
@@ -107,6 +210,16 @@ onMounted(() => {
     handleVerify()
   }
 })
+
+watch(
+  () => props.initialCropId,
+  (newId) => {
+    if (newId !== undefined && newId !== null && newId !== '') {
+      cropIdInput.value = String(newId)
+      handleVerify()
+    }
+  },
+)
 </script>
 
 <template>
@@ -125,6 +238,12 @@ onMounted(() => {
       <div class="header-actions">
         <a href="/" class="farmer-link" title="Switch to Farmer Portal">
           🌾 Farmer Portal
+        </a>
+        <a href="/supplier-retailer.html" class="farmer-link" title="Supplier & Retailer">
+          🚚 Supplier / Retailer
+        </a>
+        <a href="/ai-price-prediction.html" class="farmer-link" title="AI Price Forecast">
+          🤖 AI Prediction
         </a>
         <div class="network-chip">
           <span class="dot"></span>
@@ -217,6 +336,14 @@ onMounted(() => {
               {{ truncateAddress(verifiedCrop.currentHolder) }}
             </span>
           </div>
+        </div>
+
+        <!-- Packaging Verification QR Section -->
+        <div style="margin-bottom: 24px;">
+          <QRCodeGenerator 
+            :cropId="verifiedCrop.cropId" 
+            :cropName="verifiedCrop.cropName" 
+          />
         </div>
 
         <!-- 11 Key Crop Specifications Grid -->
@@ -634,6 +761,135 @@ onMounted(() => {
                   </tr>
                 </tbody>
               </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- AI PRICE FORECAST SECTION -->
+        <section class="panel ai-forecast-panel">
+          <div class="panel-heading">
+            <div>
+              <div class="ai-header-badge-row">
+                <span class="ai-tag">AI MODULE</span>
+                <span class="badge-pill">Price Intelligence</span>
+              </div>
+              <h3>AI PRICE FORECAST</h3>
+              <p>Transparent benchmark market pricing generated by Machine Learning regression</p>
+            </div>
+            <div class="model-badge">
+              <span class="model-icon">🤖</span>
+              <span>Random Forest Regression</span>
+            </div>
+          </div>
+
+          <!-- Loading forecast -->
+          <div v-if="loadingPrediction" class="forecast-loading">
+            <span class="spinner"></span>
+            <span>Calculating AI price forecast for Crop #{{ verifiedCrop.cropId }}...</span>
+          </div>
+
+          <!-- Forecast Error -->
+          <div v-else-if="predictionError" class="forecast-error">
+            <p>⚠️ {{ predictionError }}</p>
+          </div>
+
+          <!-- Forecast Display -->
+          <div v-else-if="aiPrediction" class="forecast-content">
+            <div class="forecast-metrics-grid">
+              <!-- Predicted Market Price -->
+              <div class="forecast-card highlight-card">
+                <span class="f-label">Predicted Market Price</span>
+                <div class="f-price-value">
+                  ₹{{ aiPrediction.predicted_price.toFixed(2) }} <span class="f-unit">/ {{ aiPrediction.unit }}</span>
+                </div>
+                <span class="f-subtext">Estimated fair market valuation</span>
+              </div>
+
+              <!-- Model -->
+              <div class="forecast-card">
+                <span class="f-label">Model</span>
+                <div class="f-value">{{ aiPrediction.model_name }}</div>
+                <span class="f-subtext">Trained on regional crop data</span>
+              </div>
+
+              <!-- Prediction Date -->
+              <div class="forecast-card">
+                <span class="f-label">Prediction Date</span>
+                <div class="f-value">{{ aiPrediction.prediction_date }}</div>
+                <span class="f-subtext">Timestamp of inference</span>
+              </div>
+
+              <!-- Forecast Type -->
+              <div class="forecast-card">
+                <span class="f-label">Forecast</span>
+                <div class="f-value text-accent">AI-generated market-price estimate</div>
+                <span class="f-subtext">Historical + market features</span>
+              </div>
+            </div>
+
+            <!-- Features Evaluated Bar -->
+            <div class="forecast-features-bar">
+              <div class="feature-item">
+                <span class="fi-label">Historical Price:</span>
+                <span class="fi-val">₹{{ aiPrediction.historical_price }}</span>
+              </div>
+              <div class="feature-item">
+                <span class="fi-label">Season:</span>
+                <span class="fi-val">{{ aiPrediction.season }}</span>
+              </div>
+              <div class="feature-item">
+                <span class="fi-label">Region:</span>
+                <span class="fi-val">{{ aiPrediction.location }}</span>
+              </div>
+              <div class="feature-item">
+                <span class="fi-label">Demand Index:</span>
+                <span class="fi-val">{{ aiPrediction.demand }}</span>
+              </div>
+              <div class="feature-item">
+                <span class="fi-label">Est. Quantity:</span>
+                <span class="fi-val">{{ aiPrediction.production_quantity }} {{ aiPrediction.unit }}</span>
+              </div>
+            </div>
+
+            <!-- Disclaimer Notice -->
+            <div class="forecast-disclaimer">
+              <span class="disc-icon">ℹ️</span>
+              <p>
+                <strong>Consumer Price Transparency Notice:</strong> The price forecast above is generated using
+                a Machine Learning algorithm based on regional cultivation parameters, seasonal cycles, and market demand indices.
+                It represents an indicative benchmark market estimate and does not represent a guaranteed retail price.
+              </p>
+            </div>
+
+            <!-- Consumer Acknowledgement Form -->
+            <div class="acknowledgement-box" :class="{ 'acknowledged-box': isAcknowledged }">
+              <div class="ack-row">
+                <label class="ack-checkbox-label">
+                  <input
+                    type="checkbox"
+                    v-model="ackChecked"
+                    :disabled="isAcknowledged || ackSubmitting"
+                    class="ack-checkbox"
+                  />
+                  <span class="ack-text">
+                    I acknowledge that this is an AI-generated market-price forecast.
+                  </span>
+                </label>
+
+                <button
+                  type="button"
+                  class="ack-btn"
+                  :disabled="!ackChecked || isAcknowledged || ackSubmitting"
+                  @click="handleAcknowledge"
+                >
+                  <span v-if="ackSubmitting" class="spinner-small"></span>
+                  <span>{{ isAcknowledged ? '✓ Acknowledged' : 'Acknowledge' }}</span>
+                </button>
+              </div>
+
+              <div v-if="ackSuccessMsg || isAcknowledged" class="ack-status-text">
+                ✓ Recorded in database: AI forecast acknowledged for this crop verification.
+              </div>
             </div>
           </div>
         </section>
@@ -1381,6 +1637,265 @@ onMounted(() => {
   .header-actions {
     flex-direction: column;
     align-items: flex-start;
+  }
+}
+
+/* AI PRICE FORECAST STYLES */
+.ai-forecast-panel {
+  border: 1px solid #93c5fd;
+  background: linear-gradient(180deg, #ffffff 0%, #f0f7ff 100%);
+  margin-top: 24px;
+}
+
+.ai-header-badge-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.ai-tag {
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: #1e3a8a;
+  color: #ffffff;
+}
+
+.model-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #1d4ed8;
+}
+
+.forecast-loading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 24px;
+  color: #475569;
+  font-weight: 600;
+}
+
+.forecast-error {
+  padding: 16px;
+  background: #fef2f2;
+  border-radius: 8px;
+  color: #991b1b;
+  font-size: 14px;
+}
+
+.forecast-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.forecast-card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 18px 16px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.forecast-card.highlight-card {
+  border-color: #3b82f6;
+  background: #eff6ff;
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.08);
+}
+
+.f-label {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #64748b;
+  margin-bottom: 8px;
+}
+
+.f-price-value {
+  font-size: 28px;
+  font-weight: 800;
+  color: #1e3a8a;
+  line-height: 1.1;
+}
+
+.f-unit {
+  font-size: 14px;
+  font-weight: 600;
+  color: #64748b;
+}
+
+.f-value {
+  font-size: 16px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.f-value.text-accent {
+  color: #2563eb;
+}
+
+.f-subtext {
+  font-size: 11px;
+  color: #94a3b8;
+  margin-top: 8px;
+}
+
+.forecast-features-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin-top: 16px;
+}
+
+.feature-item {
+  display: flex;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.fi-label {
+  color: #64748b;
+}
+
+.fi-val {
+  font-weight: 700;
+  color: #1e293b;
+}
+
+.forecast-disclaimer {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  margin-top: 16px;
+  padding: 12px 16px;
+  background: #f1f5f9;
+  border-radius: 8px;
+  font-size: 13px;
+  color: #475569;
+  line-height: 1.5;
+}
+
+.disc-icon {
+  font-size: 18px;
+  flex-shrink: 0;
+}
+
+.acknowledgement-box {
+  margin-top: 20px;
+  padding: 16px 20px;
+  background: #f8fafc;
+  border: 1px dashed #cbd5e1;
+  border-radius: 10px;
+  transition: all 0.2s ease;
+}
+
+.acknowledgement-box.acknowledged-box {
+  background: #f0fdf4;
+  border-color: #86efac;
+}
+
+.ack-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.ack-checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.ack-checkbox {
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+  accent-color: #2563eb;
+}
+
+.ack-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #2563eb;
+  color: #ffffff;
+  border: none;
+  border-radius: 6px;
+  padding: 8px 18px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.ack-btn:hover:not(:disabled) {
+  background: #1d4ed8;
+}
+
+.ack-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.spinner-small {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255, 255, 255, 0.4);
+  border-top-color: #ffffff;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+.ack-status-text {
+  margin-top: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #15803d;
+}
+
+@media (max-width: 900px) {
+  .forecast-metrics-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 650px) {
+  .forecast-metrics-grid {
+    grid-template-columns: 1fr;
+  }
+  .ack-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .ack-btn {
+    width: 100%;
+    justify-content: center;
   }
 }
 </style>

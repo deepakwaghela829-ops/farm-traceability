@@ -1,14 +1,14 @@
 {
   "contractName": "CropRegistry",
-  "contractAddress": "0xB583cC32cEf427f6781f51e9Fc2Bd8F19f4b66a5",
+  "contractAddress": "0xd359Ed83d80A58272Bae78475c80665035942241",
   "network": "ganache",
   "chainId": 1337,
   "rpcUrl": "http://127.0.0.1:7545",
-  "deployer": "0xbb7b8b76160d4C52Dcbd0690DAE8e51613eEDFa8",
-  "deploymentTxHash": "0x252836cade3dc86712c6f5a97d7243c340131682564b25a793f790182fa45893",
-  "blockNumber": 5,
+  "deployer": "0x7C77bD71b46889f6345C2A662756702dc620821c",
+  "deploymentTxHash": "0x87e9f1a504e1a88350360f35e1a673d02907bbb8081df338dc6407a3c3ab31db",
+  "blockNumber": 1,
   "gasUsed": "2090554",
-  "deployedAt": "2026-10-04T08:12:44.875Z",
+  "deployedAt": "2026-10-06T04:44:12.007Z",
   "abiFile": "abi/CropRegistry.abi.json",
   "fullArtifact": "artifacts/contracts/CropRegistry.sol/CropRegistry.json"
 }

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { fetchCrops, predictCropPrice } from '../api'
+import { fetchCrops, predictCropPrice, fetchCropBenchmarks } from '../api'
 import type { CropRecord } from '../types'
 
 interface PredictionForm {
@@ -66,7 +66,9 @@ async function handlePredict() {
   loading.value = true
 
   try {
+    const numericCropId = selectedCropId.value ? Number(selectedCropId.value) : undefined
     const payload = {
+      crop_id: numericCropId,
       crop_type: form.crop_type.trim(),
       historical_price: Number(form.historical_price),
       season: form.season.trim(),
@@ -78,7 +80,7 @@ async function handlePredict() {
     const response = await predictCropPrice(payload)
     predictedPrice.value = response.predicted_price
     lastPredictedParams.value = { ...payload }
-    successMessage.value = 'Price prediction generated successfully via Random Forest model.'
+    successMessage.value = `Price prediction generated successfully via ${response.model_name}.`
   } catch (err: unknown) {
     predictedPrice.value = null
     const msg = err instanceof Error ? err.message : 'Unable to obtain prediction.'
@@ -106,15 +108,28 @@ async function loadRegisteredCrops() {
   }
 }
 
-function handleCropSelect() {
+async function handleCropSelect() {
   if (!selectedCropId.value) return
-  const found = registeredCrops.value.find((c: CropRecord) => String(c.crop_id) === selectedCropId.value)
+  const found = registeredCrops.value.find((c: CropRecord) => String(c.crop_id) === selectedCropId.value || String(c.blockchain_crop_id) === selectedCropId.value)
   if (found) {
     if (found.crop_name) form.crop_type = found.crop_name
-    if (found.quantity) form.production_quantity = found.quantity
+    if (found.quantity) form.production_quantity = Number(found.quantity)
     if (found.location) {
       const locClean = found.location.split(',')[0].trim()
       form.location = locClean || found.location
+    }
+
+    // Auto-fetch ML dataset benchmarks for this crop type
+    try {
+      const benchmarks = await fetchCropBenchmarks(found.crop_name || form.crop_type)
+      if (benchmarks) {
+        form.historical_price = benchmarks.historical_price
+        form.demand = benchmarks.demand
+        if (!found.location) form.location = benchmarks.location
+        form.season = benchmarks.season
+      }
+    } catch {
+      // Benchmark fallback is optional
     }
   }
 }

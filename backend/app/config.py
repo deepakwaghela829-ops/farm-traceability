@@ -7,6 +7,9 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg://postgres:postgres@localhost:5432/farm_traceability"
     migration_database_url: str = ""
     api_cors_origins: str = "http://localhost:5173"
+    jwt_secret: str = "agritrace_jwt_secret_key_2026_super_secure"
+    jwt_algorithm: str = "HS256"
+    jwt_expire_minutes: int = 1440
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.schemas.crop import CropCreate, CropRead
-from app.services.crop_service import create_crop, list_crops
+from app.services.crop_service import create_crop, get_crop_by_id, list_crops
 
 router = APIRouter(prefix="/api/crops", tags=["Crop Info Management"])
 
@@ -20,10 +20,27 @@ def create_crop_record(payload: CropCreate, db: Session = Depends(get_db)) -> Cr
 
 @router.get("", response_model=list[CropRead])
 def get_crop_records(
-    farmer_id: str = Query(min_length=1, max_length=64),
+    farmer_id: str | None = Query(default=None, max_length=64),
     db: Session = Depends(get_db),
 ) -> list[CropRead]:
     try:
-        return list_crops(db, farmer_id.strip())
+        cleaned_farmer_id = farmer_id.strip() if farmer_id else None
+        return list_crops(db, cleaned_farmer_id)
     except SQLAlchemyError as exc:
         raise HTTPException(status_code=500, detail="Unable to retrieve crop records") from exc
+
+
+@router.get("/{crop_id}", response_model=CropRead)
+def get_crop_record(
+    crop_id: int,
+    db: Session = Depends(get_db),
+) -> CropRead:
+    try:
+        crop = get_crop_by_id(db, crop_id)
+        if not crop:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Crop #{crop_id} not found")
+        return crop
+    except HTTPException:
+        raise
+    except SQLAlchemyError as exc:
+        raise HTTPException(status_code=500, detail="Unable to retrieve crop record") from exc

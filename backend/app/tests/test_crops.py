@@ -1,39 +1,39 @@
-import os
-os.environ["DATABASE_URL"] = "sqlite+pysqlite:///:memory:"
-
+import pytest
 from datetime import date
-
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
-from sqlalchemy.pool import StaticPool
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
 from app.db import Base, get_db
 from app.main import app
 
-engine = create_engine("sqlite+pysqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool)
-TestingSessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
-Base.metadata.create_all(bind=engine)
+
+@pytest.fixture
+def client():
+    test_engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    TestingSessionLocal = sessionmaker(bind=test_engine, autocommit=False, autoflush=False)
+    Base.metadata.create_all(bind=test_engine)
+
+    def override_get_db():
+        db = TestingSessionLocal()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    app.dependency_overrides[get_db] = override_get_db
+    with TestClient(app) as test_client:
+        yield test_client
+    app.dependency_overrides.clear()
+    Base.metadata.drop_all(bind=test_engine)
 
 
-def override_get_db():
-    db = TestingSessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
-
-app.dependency_overrides[get_db] = override_get_db
-client = TestClient(app)
-
-
-def setup_function():
-    Base.metadata.drop_all(bind=engine)
-    Base.metadata.create_all(bind=engine)
-
-
-def test_create_crop():
+def test_create_crop(client):
     response = client.post(
         "/api/crops",
         json={
@@ -54,7 +54,7 @@ def test_create_crop():
     assert data["crop_id"] == 1
 
 
-def test_list_crops_for_farmer():
+def test_list_crops_for_farmer(client):
     payload = {
         "farmer_id": "DEMO-FARMER-001",
         "crop_name": "Lemon",
@@ -74,7 +74,7 @@ def test_list_crops_for_farmer():
     assert data[0]["crop_name"] == "Lemon"
 
 
-def test_invalid_quantity_is_rejected():
+def test_invalid_quantity_is_rejected(client):
     payload = {
         "farmer_id": "DEMO-FARMER-001",
         "crop_name": "Banana",
@@ -89,7 +89,7 @@ def test_invalid_quantity_is_rejected():
     assert response.status_code == 422
 
 
-def test_harvest_date_before_cultivation_date_is_rejected():
+def test_harvest_date_before_cultivation_date_is_rejected(client):
     payload = {
         "farmer_id": "DEMO-FARMER-001",
         "crop_name": "Banana",

@@ -5,7 +5,7 @@ import deploymentInfo from './blockchain/deployment-info.json'
 export const GANACHE_RPC = 'http://127.0.0.1:7545'
 export const REQUIRED_CHAIN_ID = 1337n
 export const CONTRACT_ADDRESS: string = deploymentInfo.contractAddress
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'https://farm-traceability-backend.vercel.app').replace(/\/$/, '')
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000').replace(/\/$/, '')
 
 export interface CropDetails {
   cropId: number
@@ -174,27 +174,50 @@ export async function loadCrop(cropIdInput: number | string): Promise<LoadCropRe
   }
 
   // 2. Fetch PostgreSQL transaction records
-  const dbTransactions = await fetchDbTransactions(numericId).catch(() => [])
+  const allDbTransactions = await fetchDbTransactions(numericId).catch(() => [])
 
-  // 3. Match DB transaction hash/block with blockchain movement history if possible
-  const movements: BlockchainMovement[] = movementsRaw.map((m, index) => {
+  // 3. Match database records to the CURRENT blockchain movement.
+  // This prevents transactions from older Ganache deployments
+  // from being attached to the current blockchain history.
+  const matchedDbTransactions = allDbTransactions.filter((tx) =>
+    movementsRaw.some((m) => {
+      const fromAddr = String(m.from ?? m[0]).toLowerCase()
+      const toAddr = String(m.to ?? m[1]).toLowerCase()
+      const toRole = String(m.toRole ?? m[2]).trim().toLowerCase()
+
+      return (
+        tx.from_address.toLowerCase() === fromAddr &&
+        tx.to_address.toLowerCase() === toAddr &&
+        tx.to_role.trim().toLowerCase() === toRole
+      )
+    }),
+  )
+
+  const movements: BlockchainMovement[] = movementsRaw.map((m) => {
     const fromAddr = String(m.from ?? m[0])
     const toAddr = String(m.to ?? m[1])
     const toRole = String(m.toRole ?? m[2])
     const ts = Number(m.timestamp ?? m[3])
 
-    // Match with corresponding DB transaction
-    const matchedTx = dbTransactions[index]
+    const matchedTx = matchedDbTransactions.find(
+      (tx) =>
+        tx.from_address.toLowerCase() === fromAddr.toLowerCase() &&
+        tx.to_address.toLowerCase() === toAddr.toLowerCase() &&
+        tx.to_role.trim().toLowerCase() === toRole.trim().toLowerCase(),
+    )
 
     return {
       from: fromAddr,
       to: toAddr,
-      toRole: toRole,
+      toRole,
       timestamp: ts,
       transactionHash: matchedTx?.transaction_hash,
       blockNumber: matchedTx?.block_number,
     }
   })
+
+  // Only show PostgreSQL records belonging to the current blockchain movements.
+  const dbTransactions = matchedDbTransactions
 
   // 4. Optionally fetch Farmer ID from PostgreSQL crops API
   let farmerId: string | undefined
@@ -355,4 +378,6 @@ export async function fetchDbTransactions(cropId: number): Promise<DbTransaction
   }
   return response.json()
 }
+
+
 
