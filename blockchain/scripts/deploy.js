@@ -41,6 +41,14 @@ async function main() {
   };
   fs.writeFileSync(path.join(__dirname, "..", "deployment-info.json"), JSON.stringify(info, null, 2));
 
+  // 3) Sync directly to frontend if present
+  const frontendBcDir = path.join(__dirname, "..", "..", "frontend", "src", "blockchain");
+  if (fs.existsSync(frontendBcDir)) {
+    fs.writeFileSync(path.join(frontendBcDir, "CropRegistry.abi.json"), JSON.stringify(artifact.abi, null, 2));
+    fs.writeFileSync(path.join(frontendBcDir, "deployment-info.json"), JSON.stringify(info, null, 2));
+    console.log("Synchronized ABI and deployment-info to frontend/src/blockchain/");
+  }
+
   console.log("Contract address :", address);
   console.log("Deployment tx    :", deployTx.hash);
   console.log("Block            :", receipt.blockNumber);

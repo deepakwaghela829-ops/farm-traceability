@@ -7,14 +7,14 @@ This document provides instructions for compiling, testing, and deploying the **
 
 ## 1. Architecture Overview
 
-- **Smart Contract:** `contracts/CropRegistry.sol` (Solidity `^0.8.24`)
+- **Smart Contract:** `blockchain/contracts/CropRegistry.sol` (Solidity `^0.8.24`)
 - **Framework:** Hardhat (`@nomicfoundation/hardhat-ethers`, `ethers.js`)
 - **Local Testnet:** Ganache GUI or Ganache CLI
 - **RPC Endpoint:** `http://127.0.0.1:7545`
 - **Chain ID:** `1337` (EVM Standard)
 - **Automatic Metadata Propagation:** When deployed via `npm run deploy`, the script automatically regenerates and synchronizes both:
-  - `deployment-info.json` & `abi/CropRegistry.abi.json`
-  - `../frontend/src/blockchain/deployment-info.json` & `../frontend/src/blockchain/CropRegistry.abi.json`
+  - `blockchain/deployment-info.json` & `blockchain/abi/CropRegistry.abi.json`
+  - `frontend/src/blockchain/deployment-info.json` & `frontend/src/blockchain/CropRegistry.abi.json`
 
 ---
 
@@ -49,6 +49,7 @@ When setting up on a fresh laptop or a clean Ganache instance, **do NOT rely on 
 ### Step 3.2: Install Dependencies & Verify Network
 Navigate to the `blockchain/` directory:
 ```bash
+cd blockchain
 npm install
 ```
 
@@ -62,7 +63,7 @@ npm run check
 ```bash
 npm run compile
 ```
-Compiles `contracts/CropRegistry.sol` using Solidity 0.8.24 and builds artifacts in `artifacts/`.
+Compiles `contracts/CropRegistry.sol` using Solidity 0.8.24 and builds artifacts in `blockchain/artifacts/`.
 
 ### Step 3.4: Deploy to Fresh Ganache Instance
 ```bash
@@ -71,9 +72,9 @@ npm run deploy
 *What this does automatically:*
 1. Deploys a new `CropRegistry` instance to Ganache.
 2. Extracts the contract address and transaction hash.
-3. Writes the ABI to `abi/CropRegistry.abi.json`.
-4. Writes deployment details to `deployment-info.json`.
-5. **Propagates** the updated ABI and `deployment-info.json` directly to `../frontend/src/blockchain/`.
+3. Writes the ABI to `blockchain/abi/CropRegistry.abi.json`.
+4. Writes deployment details to `blockchain/deployment-info.json`.
+5. **Propagates** the updated ABI and `deployment-info.json` directly to `frontend/src/blockchain/`.
 
 *Sample output:*
 ```text
