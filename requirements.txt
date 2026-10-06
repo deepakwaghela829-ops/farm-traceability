@@ -5,6 +5,7 @@ pydantic-settings==2.11.0
 SQLAlchemy==2.0.50
 alembic==1.18.4
 psycopg[binary]==3.2.11
+psycopg2-binary==2.9.10
 pytest==8.4.2
 httpx==0.28.1
 pandas>=2.2.0
