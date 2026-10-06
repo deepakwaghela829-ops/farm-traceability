@@ -22,6 +22,12 @@ const emit = defineEmits<{
 const activeNav = ref<'dashboard' | 'inventory' | 'custody-receive' | 'traceability'>('dashboard')
 const selectedCropId = ref<number | string | null>(null)
 const traceabilityTargetId = ref<number | string | undefined>(undefined)
+const selectedCustodyCropId = ref<number | string | undefined>(undefined)
+
+function handleReceiveCustody(crop: CropRecord) {
+  selectedCustodyCropId.value = crop.blockchain_crop_id ?? crop.crop_id
+  activeNav.value = 'custody-receive'
+}
 
 const navItems = computed<NavItem[]>(() => [
   { id: 'dashboard', label: 'Store Dashboard', icon: '🏪' },
@@ -155,6 +161,7 @@ function handleVerifyProduct(cropId: number | string) {
                 </td>
                 <td>
                   <button type="button" class="btn-sm" @click="selectedCropId = c.crop_id">Inspect</button>
+                  <button type="button" class="btn-sm receive" @click="handleReceiveCustody(c)">Receive</button>
                   <button type="button" class="btn-sm verify" @click="handleVerifyProduct(c.crop_id)">Verify Provenance</button>
                 </td>
               </tr>
@@ -209,7 +216,11 @@ function handleVerifyProduct(cropId: number | string) {
 
     <!-- TAB 3: RECEIVE SHIPMENTS / CUSTODY TRANSFER -->
     <div v-else-if="activeNav === 'custody-receive'" class="retailer-view">
-      <SupplierRetailer />
+      <SupplierRetailer
+        :initial-crop-id="selectedCustodyCropId"
+        :crops="crops"
+        role="RETAILER"
+      />
     </div>
 
     <!-- TAB 4: TRACEABILITY -->

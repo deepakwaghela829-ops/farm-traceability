@@ -87,3 +87,53 @@ def test_transactions_ordered_chronologically(client):
     assert len(txs) == 2
     assert txs[0]["to_role"] == "Supplier"
     assert txs[1]["to_role"] == "Retailer"
+
+
+def test_transactions_retrieval_by_db_and_blockchain_id(client):
+    # 1. Create a crop with DB id = 1 and blockchain_crop_id = 42
+    crop_payload = {
+        "farmer_id": "DEMO-FARMER-001",
+        "crop_name": "Alphonso Mango",
+        "crop_type": "Fruit",
+        "quantity": 500,
+        "unit": "kg",
+        "cultivation_date": "2026-08-01",
+        "expected_harvest_date": "2027-01-15",
+        "location": "Ratnagiri, Maharashtra",
+        "blockchain_crop_id": 42,
+        "blockchain_tx_hash": "0x" + "a" * 64,
+        "blockchain_block_number": 5,
+        "blockchain_farmer_address": "0xa5c5A997d004B8D3294E48b8494996B703E9513E",
+        "blockchain_chain_id": 1337,
+    }
+    crop_resp = client.post("/api/crops", json=crop_payload)
+    assert crop_resp.status_code == 201
+
+    # 2. Record a transaction with on-chain ID 42
+    tx_payload = {
+        "crop_id": 42,
+        "event_type": "TRANSFER",
+        "from_address": "0xa5c5A997d004B8D3294E48b8494996B703E9513E",
+        "to_address": "0x89205A3A3b2A69De6Dbf7f01ED13B2108B2c43e7",
+        "to_role": "Supplier",
+        "transaction_hash": "0x" + "b" * 64,
+        "block_number": 6,
+        "timestamp": "2026-10-04T12:00:00Z",
+    }
+    tx_resp = client.post("/api/transactions", json=tx_payload)
+    assert tx_resp.status_code == 201
+
+    # 3. Verify retrieval by Database ID (1)
+    get_by_db = client.get("/api/transactions/1")
+    assert get_by_db.status_code == 200
+    db_results = get_by_db.json()
+    assert len(db_results) == 1
+    assert db_results[0]["transaction_hash"] == tx_payload["transaction_hash"]
+
+    # 4. Verify retrieval by Blockchain ID (42)
+    get_by_chain = client.get("/api/transactions/42")
+    assert get_by_chain.status_code == 200
+    chain_results = get_by_chain.json()
+    assert len(chain_results) == 1
+    assert chain_results[0]["transaction_hash"] == tx_payload["transaction_hash"]
+

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { resolveCropProvenance } from '../cropIdentifierService'
 import { computed, onMounted, ref, watch } from 'vue'
 import {
   verifyCrop,
@@ -133,51 +134,43 @@ async function handleVerify() {
   loading.value = true
 
   try {
-    // 1. Try smart contract verification first
-    const result = await verifyCrop(input)
-    verifiedCrop.value = result
-    loadAiPrediction(result.cropId)
-  } catch (err: any) {
-    // 2. If smart contract fails, gracefully check the PostgreSQL database
-    try {
-      const dbCrop = await fetchCropById(input)
-      if (dbCrop) {
-        const txs = await fetchCropTransactions(dbCrop.blockchain_crop_id || dbCrop.crop_id).catch(() => [])
-        const movements: MovementRecord[] = txs.map(t => ({
-          from: t.from_address,
-          to: t.to_address,
-          toRole: t.role,
-          timestamp: Math.floor(new Date(t.timestamp).getTime() / 1000)
-        }))
-
-        const cultUnix = Math.floor(new Date(`${dbCrop.cultivation_date}T00:00:00`).getTime() / 1000)
-        const harvUnix = Math.floor(new Date(`${dbCrop.expected_harvest_date}T00:00:00`).getTime() / 1000)
-        const isHarvestedNow = new Date(`${dbCrop.expected_harvest_date}T00:00:00`) <= new Date()
-
-        verifiedCrop.value = {
-          cropId: String(dbCrop.blockchain_crop_id || dbCrop.crop_id),
-          farmer: dbCrop.blockchain_farmer_address || dbCrop.farmer_id,
-          cropName: dbCrop.crop_name,
-          cropType: dbCrop.crop_type,
-          quantity: String(dbCrop.quantity),
-          unit: dbCrop.unit,
-          cultivationDate: cultUnix,
-          expectedHarvestDate: harvUnix,
-          location: dbCrop.location,
-          createdAt: cultUnix,
-          isHarvested: isHarvestedNow,
-          harvestTimestamp: harvUnix,
-          currentHolder: movements.length > 0 ? movements[movements.length - 1].to : (dbCrop.blockchain_farmer_address || dbCrop.farmer_id),
-          movements
-        }
-
-        loadAiPrediction(dbCrop.blockchain_crop_id || dbCrop.crop_id)
-        return
-      }
-    } catch {
-      // Fallback to error message
+    const resolution = await resolveCropProvenance(input)
+    if (resolution.status === 'NOT_FOUND' || !resolution.crop) {
+      errorMessage.value = resolution.statusMessage || `Crop #${input} was not found.`
+      return
     }
 
+    const c = resolution.crop
+    const movements: MovementRecord[] = resolution.movements.map((m) => ({
+      from: m.from,
+      to: m.to,
+      toRole: m.toRole,
+      timestamp: m.timestamp,
+    }))
+
+    const cultUnix = Math.floor(new Date(`${c.cultivationDate}T00:00:00`).getTime() / 1000) || 0
+    const harvUnix = Math.floor(new Date(`${c.expectedHarvestDate}T00:00:00`).getTime() / 1000) || 0
+
+    verifiedCrop.value = {
+      cropId: String(resolution.blockchainCropId || resolution.databaseId || c.cropId),
+      farmer: c.farmer,
+      cropName: c.cropName,
+      cropType: c.cropType,
+      quantity: c.quantity,
+      unit: c.unit,
+      cultivationDate: cultUnix,
+      expectedHarvestDate: harvUnix,
+      location: c.location,
+      createdAt: cultUnix,
+      isHarvested: c.isHarvested,
+      harvestTimestamp: harvUnix,
+      currentHolder: c.currentHolder,
+      movements,
+    }
+
+    const aiLookupId = resolution.databaseId || resolution.blockchainCropId || c.cropId
+    loadAiPrediction(aiLookupId)
+  } catch (err: any) {
     errorMessage.value =
       err instanceof Error ? err.message : 'Unable to verify crop provenance.'
   } finally {

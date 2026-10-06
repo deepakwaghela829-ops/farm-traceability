@@ -1,6 +1,10 @@
-﻿import { ethers } from 'ethers'
+import { ethers } from 'ethers'
 import abi from './blockchain/CropRegistry.abi.json'
 import deploymentInfo from './blockchain/deployment-info.json'
+import {
+  resolveCropProvenance,
+  type UnifiedCropResolution,
+} from './cropIdentifierService'
 
 export const GANACHE_RPC = 'http://127.0.0.1:7545'
 export const REQUIRED_CHAIN_ID = 1337n
@@ -54,16 +58,7 @@ export interface LoadCropResult {
   crop: CropDetails
   movements: BlockchainMovement[]
   dbTransactions: DbTransaction[]
-}
-
-function dateFromUnix(value: bigint | string | number): string {
-  const num = Number(value)
-  if (!num || num <= 0) return 'N/A'
-  const date = new Date(num * 1000)
-  const year = date.getFullYear()
-  const month = String(date.getMonth() + 1).padStart(2, '0')
-  const day = String(date.getDate()).padStart(2, '0')
-  return `${year}-${month}-${day}`
+  resolution: UnifiedCropResolution
 }
 
 export function formatDateTime(value: number | string | bigint): string {
@@ -136,121 +131,24 @@ export async function fetchGanacheAccounts(): Promise<GanacheAccount[]> {
 }
 
 /**
- * Loads crop info from smart contract and transaction records from PostgreSQL.
+ * Loads crop info using the unified crop provenance resolver.
+ * Handles both PostgreSQL database records and Ethereum Ganache smart contract records.
  */
 export async function loadCrop(cropIdInput: number | string): Promise<LoadCropResult> {
-  const numericId = typeof cropIdInput === 'string' ? parseInt(cropIdInput.trim(), 10) : cropIdInput
-  if (isNaN(numericId) || numericId <= 0) {
-    throw new Error('Please enter a valid positive numeric Crop ID (e.g. 1).')
-  }
+  const resolution = await resolveCropProvenance(cropIdInput)
 
-  const provider = await getProvider()
-  const contract = new ethers.Contract(CONTRACT_ADDRESS, abi, provider)
-
-  // 1. Fetch on-chain state
-  let cropData: any
-  let currentHolder: string
-  let movementsRaw: any[]
-  let isHarvested = false
-
-  try {
-    const [cData, holder, hist, harvested] = await Promise.all([
-      contract.getCrop(BigInt(numericId)),
-      contract.getCurrentHolder(BigInt(numericId)),
-      contract.getMovementHistory(BigInt(numericId)),
-      contract.harvested(BigInt(numericId)),
-    ])
-
-    cropData = cData
-    currentHolder = holder
-    movementsRaw = hist || []
-    isHarvested = Boolean(harvested)
-  } catch (err: any) {
-    const msg = err?.message || String(err)
-    if (msg.includes('Crop not found') || err?.data === 'Crop not found') {
-      throw new Error(`Crop #${numericId} was not found on the blockchain.`)
-    }
-    throw new Error(err?.reason || msg)
-  }
-
-  // 2. Fetch PostgreSQL transaction records
-  const allDbTransactions = await fetchDbTransactions(numericId).catch(() => [])
-
-  // 3. Match database records to the CURRENT blockchain movement.
-  // This prevents transactions from older Ganache deployments
-  // from being attached to the current blockchain history.
-  const matchedDbTransactions = allDbTransactions.filter((tx) =>
-    movementsRaw.some((m) => {
-      const fromAddr = String(m.from ?? m[0]).toLowerCase()
-      const toAddr = String(m.to ?? m[1]).toLowerCase()
-      const toRole = String(m.toRole ?? m[2]).trim().toLowerCase()
-
-      return (
-        tx.from_address.toLowerCase() === fromAddr &&
-        tx.to_address.toLowerCase() === toAddr &&
-        tx.to_role.trim().toLowerCase() === toRole
-      )
-    }),
-  )
-
-  const movements: BlockchainMovement[] = movementsRaw.map((m) => {
-    const fromAddr = String(m.from ?? m[0])
-    const toAddr = String(m.to ?? m[1])
-    const toRole = String(m.toRole ?? m[2])
-    const ts = Number(m.timestamp ?? m[3])
-
-    const matchedTx = matchedDbTransactions.find(
-      (tx) =>
-        tx.from_address.toLowerCase() === fromAddr.toLowerCase() &&
-        tx.to_address.toLowerCase() === toAddr.toLowerCase() &&
-        tx.to_role.trim().toLowerCase() === toRole.trim().toLowerCase(),
+  if (resolution.status === 'NOT_FOUND' || !resolution.crop) {
+    throw new Error(
+      resolution.statusMessage || `Crop #${cropIdInput} was not found in the database or on the blockchain.`,
     )
-
-    return {
-      from: fromAddr,
-      to: toAddr,
-      toRole,
-      timestamp: ts,
-      transactionHash: matchedTx?.transaction_hash,
-      blockNumber: matchedTx?.block_number,
-    }
-  })
-
-  // Only show PostgreSQL records belonging to the current blockchain movements.
-  const dbTransactions = matchedDbTransactions
-
-  // 4. Optionally fetch Farmer ID from PostgreSQL crops API
-  let farmerId: string | undefined
-  try {
-    const cropResp = await fetch(`${API_BASE_URL}/api/crops?farmer_id=DEMO-FARMER-001`)
-    if (cropResp.ok) {
-      const records = await cropResp.json()
-      const found = records.find((r: any) => r.blockchain_crop_id === numericId)
-      if (found) {
-        farmerId = found.farmer_id
-      }
-    }
-  } catch {
-    // Non-critical if backend crops query fails
   }
 
-  const crop: CropDetails = {
-    cropId: numericId,
-    farmer: String(cropData.farmer ?? cropData[1]),
-    cropName: String(cropData.cropName ?? cropData[2]),
-    cropType: String(cropData.cropType ?? cropData[3]),
-    quantity: (cropData.quantity ?? cropData[4]).toString(),
-    unit: String(cropData.unit ?? cropData[5]),
-    cultivationDate: dateFromUnix(cropData.cultivationDate ?? cropData[6]),
-    expectedHarvestDate: dateFromUnix(cropData.expectedHarvestDate ?? cropData[7]),
-    location: String(cropData.location ?? cropData[8]),
-    createdAt: dateFromUnix(cropData.createdAt ?? cropData[9]),
-    currentHolder: String(currentHolder),
-    isHarvested,
-    farmerId,
+  return {
+    crop: resolution.crop,
+    movements: resolution.movements,
+    dbTransactions: resolution.dbTransactions,
+    resolution,
   }
-
-  return { crop, movements, dbTransactions }
 }
 
 /**
@@ -378,6 +276,3 @@ export async function fetchDbTransactions(cropId: number): Promise<DbTransaction
   }
   return response.json()
 }
-
-
-

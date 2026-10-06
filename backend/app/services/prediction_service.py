@@ -113,10 +113,24 @@ def get_or_create_crop_prediction(
     db: Session,
     crop_id: int,
 ) -> PricePredictionResponse | None:
-    # Check if prediction already saved for crop_id
+    # Resolve crop to find all associated IDs (database PK and blockchain ID)
+    crop_stmt = (
+        select(Crop)
+        .where((Crop.blockchain_crop_id == crop_id) | (Crop.crop_id == crop_id))
+        .order_by(Crop.crop_id.desc())
+    )
+    crop = db.scalars(crop_stmt).first()
+
+    target_ids = {crop_id}
+    if crop:
+        target_ids.add(crop.crop_id)
+        if crop.blockchain_crop_id:
+            target_ids.add(crop.blockchain_crop_id)
+
+    # Check if prediction already saved for any associated crop_id
     stmt = (
         select(CropPrediction)
-        .where(CropPrediction.crop_id == crop_id)
+        .where(CropPrediction.crop_id.in_(list(target_ids)))
         .order_by(CropPrediction.created_at.desc(), CropPrediction.id.desc())
     )
     existing = db.scalars(stmt).first()
@@ -135,14 +149,6 @@ def get_or_create_crop_prediction(
             demand=existing.demand,
             production_quantity=existing.production_quantity,
         )
-
-    # Check if crop exists in crops table by blockchain_crop_id or crop_id
-    crop_stmt = (
-        select(Crop)
-        .where((Crop.blockchain_crop_id == crop_id) | (Crop.crop_id == crop_id))
-        .order_by(Crop.crop_id.desc())
-    )
-    crop = db.scalars(crop_stmt).first()
 
     crop_name = crop.crop_name if crop else "Banana"
     location = crop.location if crop else "Palghar"
@@ -191,9 +197,19 @@ def get_consumer_acknowledgement(
     db: Session,
     crop_id: int,
 ) -> ConsumerAcknowledgement | None:
+    target_ids = {crop_id}
+    crop = db.scalars(
+        select(Crop).where((Crop.blockchain_crop_id == crop_id) | (Crop.crop_id == crop_id))
+    ).first()
+    if crop:
+        target_ids.add(crop.crop_id)
+        if crop.blockchain_crop_id:
+            target_ids.add(crop.blockchain_crop_id)
+
     stmt = (
         select(ConsumerAcknowledgement)
-        .where(ConsumerAcknowledgement.crop_id == crop_id)
+        .where(ConsumerAcknowledgement.crop_id.in_(list(target_ids)))
         .order_by(ConsumerAcknowledgement.acknowledged_at.desc(), ConsumerAcknowledgement.id.desc())
     )
     return db.scalars(stmt).first()
+

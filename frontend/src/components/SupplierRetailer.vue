@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import {
   fetchGanacheAccounts,
   loadCrop,
@@ -15,12 +15,27 @@ import {
   REQUIRED_CHAIN_ID,
   GANACHE_RPC,
 } from '../supplierRetailerService'
+import type { CropRecord } from '../api'
+import type { UnifiedCropResolution } from '../cropIdentifierService'
+
+const props = withDefaults(
+  defineProps<{
+    initialCropId?: number | string
+    crops?: CropRecord[]
+    role?: 'SUPPLIER' | 'RETAILER'
+  }>(),
+  {
+    role: 'SUPPLIER',
+    crops: () => [],
+  },
+)
 
 // Search & initialization state
 const searchCropId = ref<string | number>('')
 const loadingCrop = ref<boolean>(false)
 const cropError = ref<string>('')
 const initError = ref<string>('')
+const cropResolution = ref<UnifiedCropResolution | null>(null)
 
 // Sanitized & normalized Crop ID string
 const normalizedCropId = computed<string>(() => {
@@ -41,7 +56,6 @@ const canLoadCrop = computed<boolean>(() => {
   return parsedCropId.value !== null && !loadingCrop.value
 })
 
-
 // Loaded data
 const crop = ref<CropDetails | null>(null)
 const movements = ref<BlockchainMovement[]>([])
@@ -54,7 +68,7 @@ const loadingAccounts = ref<boolean>(false)
 
 // Transfer form state
 const destinationAddress = ref<string>('')
-const destinationRole = ref<string>('Supplier')
+const destinationRole = ref<string>(props.role === 'SUPPLIER' ? 'Retailer' : 'Consumer')
 const transferring = ref<boolean>(false)
 const transferProgress = ref<string>('')
 const transferError = ref<string>('')
@@ -82,7 +96,6 @@ const currentHolderStage = computed<'Farmer' | 'Supplier' | 'Retailer' | 'Unknow
     return 'Farmer'
   }
 
-  // Look through movement history in reverse
   const lastMatching = [...movements.value].reverse().find((m) => m.to.toLowerCase() === holder)
   if (lastMatching) {
     const roleLower = lastMatching.toRole.toLowerCase()
@@ -102,6 +115,7 @@ const isSignerCurrentHolder = computed<boolean>(() => {
 // Validation: Is the transfer form valid?
 const isTransferValid = computed<boolean>(() => {
   if (!crop.value) return false
+  if (!cropResolution.value?.canTransferCustody) return false
   if (!isSignerCurrentHolder.value) return false
   const dest = destinationAddress.value.trim().toLowerCase()
   if (!dest) return false
@@ -127,26 +141,27 @@ async function loadAccountsList() {
   }
 }
 
-// Load Crop Data
-async function handleLoadCrop() {
+// Load Crop Data (resolves DB and EVM)
+async function handleLoadCrop(idToLoad?: number | string) {
   cropError.value = ''
   transferError.value = ''
   transferSuccess.value = null
 
-  const validId = parsedCropId.value
-  if (validId === null) {
+  const targetId = idToLoad !== undefined ? idToLoad : parsedCropId.value
+  if (targetId === null || targetId === undefined) {
     cropError.value = 'Please enter a valid positive integer Crop ID (e.g. 1).'
     return
   }
 
+  searchCropId.value = targetId
   loadingCrop.value = true
   try {
-    const result = await loadCrop(validId)
+    const result = await loadCrop(targetId)
     crop.value = result.crop
     movements.value = result.movements
     dbTransactions.value = result.dbTransactions
+    cropResolution.value = result.resolution
 
-    // If selectedAccount is not the current holder, auto-select current holder if it's in accounts
     if (result.crop?.currentHolder && accounts.value.length) {
       const matchingAccount = accounts.value.find(
         (a) => a.address.toLowerCase() === result.crop.currentHolder.toLowerCase(),
@@ -159,24 +174,38 @@ async function handleLoadCrop() {
     crop.value = null
     movements.value = []
     dbTransactions.value = []
+    cropResolution.value = null
     cropError.value = err instanceof Error ? err.message : 'Failed to load crop.'
   } finally {
     loadingCrop.value = false
   }
 }
 
-// Quick select account as destination
+function onSearchSubmit() {
+  handleLoadCrop()
+}
+
+function selectBatch(batch: CropRecord) {
+  const id = batch.blockchain_crop_id ?? batch.crop_id
+  handleLoadCrop(id)
+}
+
 function setDestinationAddress(addr: string) {
   destinationAddress.value = addr
 }
 
-// Execute Crop Transfer
 async function handleTransfer() {
   transferError.value = ''
   transferSuccess.value = null
 
   if (!crop.value) {
     transferError.value = 'Please load a crop first.'
+    return
+  }
+
+  if (!cropResolution.value?.canTransferCustody) {
+    transferError.value =
+      'Cannot execute on-chain transfer: this crop batch is not registered on Ganache.'
     return
   }
 
@@ -193,7 +222,13 @@ async function handleTransfer() {
   }
 
   if (dest.toLowerCase() === selectedAccount.value.toLowerCase()) {
-    transferError.value = 'Destination address cannot be the same as the current holder address.'
+    transferError.value = 'Destination address cannot be the same as current holder.'
+    return
+  }
+
+  const onChainCropId = cropResolution.value.blockchainCropId
+  if (!onChainCropId) {
+    transferError.value = 'Missing valid on-chain Crop ID.'
     return
   }
 
@@ -204,20 +239,17 @@ async function handleTransfer() {
     const fromAddr = selectedAccount.value
     const toAddr = dest
     const toRole = destinationRole.value
-    const cropIdNum = crop.value.cropId
 
-    // 1. Submit on-chain transfer
     transferProgress.value = 'Waiting for blockchain block confirmation...'
-    const onChainResult = await executeTransfer(cropIdNum, fromAddr, toAddr, toRole)
+    const onChainResult = await executeTransfer(onChainCropId, fromAddr, toAddr, toRole)
 
     transferProgress.value = 'Blockchain confirmed! Synchronizing with PostgreSQL...'
 
-    // 2. Save transaction in PostgreSQL
     let dbSuccess = true
     let dbErrMsg = ''
     try {
       await saveTransactionToBackend({
-        crop_id: cropIdNum,
+        crop_id: cropResolution.value.databaseId || onChainCropId,
         event_type: 'TRANSFER',
         from_address: fromAddr,
         to_address: toAddr,
@@ -228,32 +260,24 @@ async function handleTransfer() {
       })
     } catch (dbErr: any) {
       dbSuccess = false
-      dbErrMsg = dbErr?.message || 'Database sync failed.'
+      dbErrMsg = dbErr?.message || 'Database sync error'
     }
 
-    // 3. Set success state
     transferSuccess.value = {
       txHash: onChainResult.txHash,
       blockNumber: onChainResult.blockNumber,
       from: fromAddr,
       to: toAddr,
       role: toRole,
-      cropId: cropIdNum,
+      cropId: onChainCropId,
       dbSynced: dbSuccess,
       dbErrorMsg: dbErrMsg,
     }
 
-    // 4. Reset form fields
     destinationAddress.value = ''
 
-    // 5. Refresh data from blockchain and PostgreSQL immediately
     transferProgress.value = 'Refreshing on-chain data...'
-    const refreshed = await loadCrop(cropIdNum)
-    crop.value = refreshed.crop
-    movements.value = refreshed.movements
-    dbTransactions.value = refreshed.dbTransactions
-
-    // Refresh account balances
+    await handleLoadCrop(onChainCropId)
     await loadAccountsList()
   } catch (err: any) {
     transferError.value = err instanceof Error ? err.message : 'Transfer failed.'
@@ -278,14 +302,29 @@ function copyToClipboard(text: string) {
 onMounted(async () => {
   await loadAccountsList()
 
-  // Auto-load if query param exists (e.g. ?cropId=1)
+  if (props.initialCropId) {
+    searchCropId.value = props.initialCropId
+    await handleLoadCrop(props.initialCropId)
+    return
+  }
+
   const urlParams = new URLSearchParams(window.location.search)
   const urlCropId = urlParams.get('cropId') || urlParams.get('id')
   if (urlCropId) {
     searchCropId.value = urlCropId
-    await handleLoadCrop()
+    await handleLoadCrop(urlCropId)
   }
 })
+
+watch(
+  () => props.initialCropId,
+  (newId) => {
+    if (newId) {
+      searchCropId.value = newId
+      handleLoadCrop(newId)
+    }
+  },
+)
 </script>
 
 <template>
@@ -328,7 +367,7 @@ onMounted(async () => {
           </p>
         </div>
 
-        <form class="search-form" @submit.prevent="handleLoadCrop">
+        <form class="search-form" @submit.prevent="onSearchSubmit">
           <div class="input-wrap">
             <span class="input-prefix">ID #</span>
             <input
@@ -356,6 +395,35 @@ onMounted(async () => {
       <!-- Global Error Alert -->
       <div v-if="cropError" class="alert error">
         <strong>Error:</strong> {{ cropError }}
+      </div>
+
+      <!-- Provenance Resolution Banner: Database-Only Mode -->
+      <div v-if="crop && cropResolution && cropResolution.status === 'DATABASE_VERIFIED_OFFCHAIN'" class="alert info-banner">
+        <div class="info-banner-content">
+          <strong>📋 Database Record Found (DB #{{ cropResolution.databaseId }})</strong>
+          <p>{{ cropResolution.statusMessage }}</p>
+          <div class="id-pills-row">
+            <span class="pill-tag">PostgreSQL Primary Key: #{{ cropResolution.databaseId }}</span>
+            <span class="pill-tag offchain">Blockchain Status: {{ cropResolution.blockchainCropId ? `Token #${cropResolution.blockchainCropId} (Prior deployment/unreachable)` : 'Unminted (Off-Chain Catalog)' }}</span>
+            <span class="pill-tag verified">STATUS: DATABASE VERIFIED</span>
+          </div>
+        </div>
+        <button type="button" class="retry-btn" :disabled="loadingCrop" @click="handleLoadCrop()">
+          {{ loadingCrop ? 'Verifying...' : '↻ Refresh Blockchain' }}
+        </button>
+      </div>
+
+      <!-- Provenance Resolution Banner: On-Chain Verified Mode -->
+      <div v-if="crop && cropResolution && cropResolution.status === 'ON_CHAIN_VERIFIED'" class="alert success-banner">
+        <div class="success-banner-content">
+          <strong>🛡️ Cryptographically Verified On-Chain (Blockchain #{{ cropResolution.blockchainCropId }})</strong>
+          <p>Settled on Ethereum Ganache (Chain ID 1337). Smart contract state verified and active.</p>
+          <div class="id-pills-row">
+            <span class="pill-tag">PostgreSQL DB: #{{ cropResolution.databaseId || 'Synced' }}</span>
+            <span class="pill-tag onchain">On-Chain Token: #{{ cropResolution.blockchainCropId }}</span>
+            <span class="pill-tag verified-green">STATUS: ON-CHAIN VERIFIED</span>
+          </div>
+        </div>
       </div>
 
       <!-- Loaded Crop Content -->
@@ -481,8 +549,15 @@ onMounted(async () => {
 
           <div class="specs-grid">
             <div class="spec-card">
-              <span class="spec-label">Crop ID</span>
-              <span class="spec-value highlight">#{{ crop.cropId }}</span>
+              <span class="spec-label">Database Crop ID</span>
+              <span class="spec-value highlight">#{{ cropResolution?.databaseId ?? crop.cropId }}</span>
+            </div>
+
+            <div class="spec-card">
+              <span class="spec-label">Blockchain Crop ID</span>
+              <span class="spec-value" :class="cropResolution?.blockchainCropId ? 'highlight' : 'text-muted'">
+                {{ cropResolution?.blockchainCropId ? `#${cropResolution.blockchainCropId}` : 'Off-Chain' }}
+              </span>
             </div>
 
             <div class="spec-card">
@@ -636,6 +711,11 @@ onMounted(async () => {
             </div>
 
             <form @submit.prevent="handleTransfer">
+              <div v-if="!cropResolution?.canTransferCustody" class="alert warning offchain-warning">
+                <strong>⚠️ On-Chain Transfer Restricted:</strong>
+                <span>This crop is stored in PostgreSQL but is not registered on the current Ganache blockchain node. On-chain custody transfer requires an active on-chain registration minted via Farmer Portal.</span>
+              </div>
+
               <div class="form-fields">
                 <label class="field">
                   <span>Destination Wallet Address *</span>
@@ -878,6 +958,46 @@ onMounted(async () => {
           </div>
         </section>
       </div>
+      <!-- Empty State: Quick Batch Selector -->
+      <section v-if="!crop && !loadingCrop" class="panel empty-crop-selector">
+        <div class="empty-hero-text">
+          <span class="empty-icon">📦</span>
+          <h3>Select an Incoming Shipment for Custody Handover</h3>
+          <p>
+            Choose any consignment below or enter a Crop ID above to inspect on-chain custody and movement history.
+          </p>
+        </div>
+
+        <div v-if="crops && crops.length > 0" class="quick-batches-grid">
+          <div
+            v-for="b in crops"
+            :key="b.crop_id"
+            class="batch-select-card"
+            @click="selectBatch(b)"
+          >
+            <div class="batch-card-header">
+              <strong>{{ b.crop_name }}</strong>
+              <span class="batch-type-pill">{{ b.crop_type }}</span>
+            </div>
+            <div class="batch-card-badges">
+              <span class="badge-tag db">DB #{{ b.crop_id }}</span>
+              <span class="badge-tag" :class="b.blockchain_crop_id ? 'onchain' : 'offchain'">
+                {{ b.blockchain_crop_id ? `On-Chain #${b.blockchain_crop_id}` : 'Off-Chain' }}
+              </span>
+            </div>
+            <div class="batch-card-details">
+              <span>⚖️ {{ b.quantity }} {{ b.unit }}</span>
+              <span>📍 {{ b.location }}</span>
+            </div>
+            <button type="button" class="btn-card-select">
+              Select &amp; Inspect ➔
+            </button>
+          </div>
+        </div>
+        <div v-else class="empty-fallback-hint">
+          No crops found in catalog. Register a crop in the Farmer Portal first.
+        </div>
+      </section>
     </main>
   </div>
 </template>
@@ -1674,5 +1794,185 @@ onMounted(async () => {
     flex-direction: column;
     align-items: flex-start;
   }
+}
+
+/* Provenance Banners & Empty State Styles */
+.info-banner {
+  background: rgba(30, 41, 59, 0.9);
+  border: 1px solid #38bdf8;
+  border-radius: 12px;
+  padding: 16px 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+.info-banner-content strong {
+  color: #38bdf8;
+  font-size: 15px;
+}
+.info-banner-content p {
+  margin: 4px 0 10px;
+  color: #cbd5e1;
+  font-size: 13px;
+}
+.success-banner {
+  background: rgba(6, 78, 59, 0.35);
+  border: 1px solid #10b981;
+  border-radius: 12px;
+  padding: 16px 20px;
+  margin-bottom: 20px;
+}
+.success-banner-content strong {
+  color: #34d399;
+  font-size: 15px;
+}
+.success-banner-content p {
+  margin: 4px 0 10px;
+  color: #a7f3d0;
+  font-size: 13px;
+}
+.id-pills-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.pill-tag {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: #1e293b;
+  color: #94a3b8;
+}
+.pill-tag.offchain {
+  color: #fbbf24;
+  background: rgba(251, 191, 36, 0.15);
+  border: 1px solid rgba(251, 191, 36, 0.3);
+}
+.pill-tag.onchain {
+  color: #34d399;
+  background: rgba(16, 185, 129, 0.15);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+.pill-tag.verified {
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.15);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+}
+.pill-tag.verified-green {
+  color: #34d399;
+  background: rgba(16, 185, 129, 0.2);
+  border: 1px solid rgba(16, 185, 129, 0.4);
+}
+.empty-crop-selector {
+  padding: 32px 24px;
+  text-align: center;
+  background: #0f172a;
+  border: 1px solid #1e293b;
+  border-radius: 14px;
+}
+.empty-hero-text .empty-icon {
+  font-size: 42px;
+  display: block;
+  margin-bottom: 8px;
+}
+.empty-hero-text h3 {
+  font-size: 18px;
+  color: #f8fafc;
+  margin: 0 0 6px;
+}
+.empty-hero-text p {
+  color: #94a3b8;
+  font-size: 13px;
+  max-width: 540px;
+  margin: 0 auto 24px;
+}
+.quick-batches-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 16px;
+  text-align: left;
+}
+.batch-select-card {
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 10px;
+  padding: 16px;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.batch-select-card:hover {
+  border-color: #38bdf8;
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(0,0,0,0.3);
+}
+.batch-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.batch-card-header strong {
+  font-size: 15px;
+  color: #f8fafc;
+}
+.batch-type-pill {
+  font-size: 11px;
+  background: #0f172a;
+  color: #94a3b8;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.batch-card-badges {
+  display: flex;
+  gap: 6px;
+}
+.badge-tag {
+  font-family: monospace;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.badge-tag.db {
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.1);
+}
+.badge-tag.onchain {
+  color: #34d399;
+  background: rgba(16, 185, 129, 0.1);
+}
+.badge-tag.offchain {
+  color: #94a3b8;
+  background: #0f172a;
+}
+.batch-card-details {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: #94a3b8;
+}
+.btn-card-select {
+  background: #2563eb;
+  color: #fff;
+  border: none;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  width: 100%;
+}
+.btn-card-select:hover {
+  background: #1d4ed8;
+}
+.offchain-warning {
+  margin-bottom: 16px;
+  font-size: 13px;
+  line-height: 1.4;
 }
 </style>

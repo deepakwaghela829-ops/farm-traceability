@@ -29,6 +29,16 @@ app.include_router(transactions_router)
 app.include_router(prediction_router)
 
 
+@app.on_event("startup")
+def startup_event():
+    try:
+        from app.ai.predictor import get_model, get_market_benchmarks
+        get_model()
+        get_market_benchmarks()
+    except Exception:
+        pass
+
+
 @app.get("/health")
 def health() -> dict[str, str]:
-    return {"status": "ok"}
+    return {"status": "ok"}

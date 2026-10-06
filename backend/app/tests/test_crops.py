@@ -102,3 +102,68 @@ def test_harvest_date_before_cultivation_date_is_rejected(client):
     }
     response = client.post("/api/crops", json=payload)
     assert response.status_code == 422
+
+
+def test_get_crop_by_db_id_and_blockchain_id(client):
+    # Test case where Database ID != Blockchain ID (DB ID = 1, Blockchain ID = 42)
+    payload = {
+        "farmer_id": "DEMO-FARMER-001",
+        "crop_name": "Alphonso Mango",
+        "crop_type": "Fruit",
+        "quantity": 500,
+        "unit": "kg",
+        "cultivation_date": "2026-08-01",
+        "expected_harvest_date": "2027-01-15",
+        "location": "Ratnagiri, Maharashtra",
+        "blockchain_crop_id": 42,
+        "blockchain_tx_hash": "0x" + "a" * 64,
+        "blockchain_block_number": 5,
+        "blockchain_farmer_address": "0xa5c5A997d004B8D3294E48b8494996B703E9513E",
+        "blockchain_chain_id": 1337,
+    }
+    create_resp = client.post("/api/crops", json=payload)
+    assert create_resp.status_code == 201
+    created_data = create_resp.json()
+    assert created_data["crop_id"] == 1
+    assert created_data["blockchain_crop_id"] == 42
+
+    # Lookup by Database ID (1)
+    by_db_resp = client.get("/api/crops/1")
+    assert by_db_resp.status_code == 200
+    assert by_db_resp.json()["crop_name"] == "Alphonso Mango"
+    assert by_db_resp.json()["blockchain_crop_id"] == 42
+
+    # Lookup by Blockchain ID (42)
+    by_chain_resp = client.get("/api/crops/42")
+    assert by_chain_resp.status_code == 200
+    assert by_chain_resp.json()["crop_name"] == "Alphonso Mango"
+    assert by_chain_resp.json()["crop_id"] == 1
+
+
+def test_crop_with_missing_blockchain_metadata(client):
+    payload = {
+        "farmer_id": "DEMO-FARMER-002",
+        "crop_name": "Tomato",
+        "crop_type": "Vegetable",
+        "quantity": 250,
+        "unit": "kg",
+        "cultivation_date": "2026-08-01",
+        "expected_harvest_date": "2026-11-15",
+        "location": "Nashik, Maharashtra",
+    }
+    create_resp = client.post("/api/crops", json=payload)
+    assert create_resp.status_code == 201
+    data = create_resp.json()
+    assert data["blockchain_crop_id"] is None
+    assert data["blockchain_tx_hash"] is None
+
+    # Retrieve by database ID
+    get_resp = client.get(f"/api/crops/{data['crop_id']}")
+    assert get_resp.status_code == 200
+    assert get_resp.json()["blockchain_crop_id"] is None
+
+
+def test_crop_not_found(client):
+    response = client.get("/api/crops/999")
+    assert response.status_code == 404
+

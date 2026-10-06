@@ -36,5 +36,8 @@ def list_crops(db: Session, farmer_id: str | None = None) -> list[Crop]:
 
 
 def get_crop_by_id(db: Session, crop_id: int) -> Crop | None:
-    statement = select(Crop).where((Crop.crop_id == crop_id) | (Crop.blockchain_crop_id == crop_id))
-    return db.scalars(statement).first()
+    crop = db.scalars(select(Crop).where(Crop.crop_id == crop_id)).first()
+    if crop:
+        return crop
+    return db.scalars(select(Crop).where(Crop.blockchain_crop_id == crop_id)).first()
+
