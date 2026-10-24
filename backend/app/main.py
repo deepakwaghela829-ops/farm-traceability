@@ -32,6 +32,11 @@ app.include_router(prediction_router)
 @app.on_event("startup")
 def startup_event():
     try:
+        from app.db import Base, engine
+        Base.metadata.create_all(bind=engine, checkfirst=True)
+    except Exception:
+        pass
+    try:
         from app.ai.predictor import get_model, get_market_benchmarks
         get_model()
         get_market_benchmarks()

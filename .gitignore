@@ -41,6 +41,8 @@ blockchain/node_modules/
 *.log
 *.tmp
 *.bak
+*.db
+*.sqlite*
 coverage/
 scripts/.viva-pids.json
 

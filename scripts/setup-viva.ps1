@@ -5,7 +5,7 @@ $ErrorActionPreference = "Stop"
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 
 Write-Host "==========================================================" -ForegroundColor Cyan
-Write-Host " Farm Traceability System — Local Viva Setup" -ForegroundColor Cyan
+Write-Host " Farm Traceability System - Local Viva Setup" -ForegroundColor Cyan
 Write-Host "==========================================================" -ForegroundColor Cyan
 Write-Host "Project Root: $ProjectRoot`n"
 
@@ -28,7 +28,7 @@ try {
 }
 
 # 3. Setup Blockchain dependencies
-Write-Host "`n[3/5] Installing Blockchain (Hardhat + Ethers) dependencies..." -ForegroundColor Yellow
+Write-Host "`n[3/5] Installing Blockchain dependencies..." -ForegroundColor Yellow
 Push-Location "$ProjectRoot\blockchain"
 try {
     & npm install --no-audit --no-fund
@@ -40,12 +40,14 @@ try {
 # 4. Setup Backend Virtual Environment & Dependencies
 Write-Host "`n[4/5] Setting up Backend Python environment..." -ForegroundColor Yellow
 $venvDir = "$ProjectRoot\backend\.venv"
+
 if (-not (Test-Path "$venvDir\Scripts\python.exe")) {
     Write-Host "  Creating virtual environment at backend\.venv..."
     & python -m venv "$venvDir"
 }
 
 $pipExe = "$venvDir\Scripts\pip.exe"
+
 if (Test-Path $pipExe) {
     Write-Host "  Installing backend requirements..."
     & $pipExe install -r "$ProjectRoot\backend\requirements.txt" --quiet
@@ -56,7 +58,7 @@ if (Test-Path $pipExe) {
 }
 
 # 5. Setup Frontend dependencies
-Write-Host "`n[5/5] Installing Frontend (Vue 3 + Vite) dependencies..." -ForegroundColor Yellow
+Write-Host "`n[5/5] Installing Frontend dependencies..." -ForegroundColor Yellow
 Push-Location "$ProjectRoot\frontend"
 try {
     & npm install --no-audit --no-fund
@@ -65,13 +67,15 @@ try {
     Pop-Location
 }
 
-# Verify / initialize environment files from examples
+# Verify / initialize blockchain environment file
 if (-not (Test-Path "$ProjectRoot\blockchain\.env") -and (Test-Path "$ProjectRoot\blockchain\.env.example")) {
     Copy-Item "$ProjectRoot\blockchain\.env.example" "$ProjectRoot\blockchain\.env"
     Write-Host "  Created blockchain\.env from template." -ForegroundColor Gray
 }
 
 Write-Host "`n==========================================================" -ForegroundColor Cyan
-Write-Host " [SUCCESS] Setup complete! You can now run:" -ForegroundColor Green
-Write-Host " powershell -ExecutionPolicy Bypass -File scripts\start-viva.ps1" -ForegroundColor White
+Write-Host " [SUCCESS] Setup complete!" -ForegroundColor Green
+Write-Host "==========================================================" -ForegroundColor Cyan
+Write-Host "Next command:"
+Write-Host "powershell -ExecutionPolicy Bypass -File scripts\start-viva.ps1" -ForegroundColor White
 Write-Host "==========================================================" -ForegroundColor Cyan

@@ -22,6 +22,8 @@ _engine_kwargs = {"pool_pre_ping": True}
 if _is_transaction_pooler:
     _engine_kwargs["poolclass"] = NullPool
     _engine_kwargs["connect_args"] = {"prepare_threshold": None, "sslmode": "require"}
+elif _db_url.startswith("sqlite"):
+    _engine_kwargs["connect_args"] = {"check_same_thread": False}
 
 engine = create_engine(_db_url, **_engine_kwargs)
 SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False, expire_on_commit=False)

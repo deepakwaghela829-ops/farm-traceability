@@ -1,10 +1,5 @@
 # start-viva.ps1
-# Automates starting the local viva environment:
-# 1. Verifies Ganache RPC (http://127.0.0.1:7545, Chain ID 1337)
-# 2. Deploys fresh CropRegistry smart contract & auto-syncs deployment-info.json
-# 3. Seeds demo users (farmer1, supplier1, retailer1, consumer1, admin1)
-# 4. Starts FastAPI backend & Vue frontend
-# 5. Tracks process IDs in scripts/.viva-pids.json for clean teardown
+# Automates starting the local viva environment.
 
 $ErrorActionPreference = "Stop"
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
@@ -12,58 +7,95 @@ $PidFile = "$PSScriptRoot\.viva-pids.json"
 $SpawnedPids = @()
 
 Write-Host "==========================================================" -ForegroundColor Cyan
-Write-Host " Farm Traceability System — Starting Local Viva Suite" -ForegroundColor Cyan
+Write-Host " Farm Traceability System - Starting Local Viva Suite" -ForegroundColor Cyan
 Write-Host "==========================================================" -ForegroundColor Cyan
 
 # 1. Check Ganache Connection
 Write-Host "`n[1/4] Verifying Ganache RPC at http://127.0.0.1:7545..." -ForegroundColor Yellow
 $rpcOnline = $false
+
 try {
-    $res = Invoke-RestMethod -Uri "http://127.0.0.1:7545" -Method Post -ContentType "application/json" -Body '{"jsonrpc":"2.0","method":"net_version","params":[],"id":1}' -TimeoutSec 3 -ErrorAction SilentlyContinue
+    $res = Invoke-RestMethod `
+        -Uri "http://127.0.0.1:7545" `
+        -Method Post `
+        -ContentType "application/json" `
+        -Body '{"jsonrpc":"2.0","method":"net_version","params":[],"id":1}' `
+        -TimeoutSec 3 `
+        -ErrorAction SilentlyContinue
+
     if ($res -and $res.result) {
         $rpcOnline = $true
         Write-Host "  [OK] Ganache RPC is active (Network ID: $($res.result))" -ForegroundColor Green
     }
-} catch {
+}
+catch {
     $rpcOnline = $false
 }
 
 if (-not $rpcOnline) {
     Write-Host "  Ganache is not detected on port 7545. Attempting to start Ganache CLI..." -ForegroundColor Yellow
+
     try {
-        $ganacheProc = Start-Process -FilePath "npx.cmd" -ArgumentList "ganache", "--server.port", "7545", "--chain.chainId", "1337" -PassThru -WindowStyle Hidden
+        $ganacheProc = Start-Process `
+            -FilePath "npx.cmd" `
+            -ArgumentList "ganache", "--server.port", "7545", "--chain.chainId", "1337" `
+            -PassThru `
+            -WindowStyle Hidden
+
         $SpawnedPids += $ganacheProc.Id
-        Start-Sleep -Seconds 3
+        Start-Sleep -Seconds 5
+
         Write-Host "  [OK] Started Ganache background process (PID: $($ganacheProc.Id))" -ForegroundColor Green
-    } catch {
+    }
+    catch {
         Write-Warning "Could not start Ganache CLI automatically. Please ensure Ganache GUI or CLI is running at http://127.0.0.1:7545."
     }
 }
 
 # 2. Deploy CropRegistry Smart Contract
 Write-Host "`n[2/4] Deploying CropRegistry smart contract to fresh chain..." -ForegroundColor Yellow
+
 Push-Location "$ProjectRoot\blockchain"
+
 try {
     & npx hardhat run scripts/deploy.js --network ganache
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "Hardhat deployment returned exit code $LASTEXITCODE"
+    }
+
     Write-Host "  [OK] Smart contract deployed and metadata synchronized!" -ForegroundColor Green
-} catch {
+}
+catch {
     Write-Warning "Smart contract deployment had warnings or errors. Check Ganache status."
-} finally {
+    Write-Warning $_
+}
+finally {
     Pop-Location
 }
 
 # 3. Seed Demo Users in Backend
 Write-Host "`n[3/4] Ensuring demo accounts are seeded..." -ForegroundColor Yellow
+
 $pythonExe = "$ProjectRoot\backend\.venv\Scripts\python.exe"
+
 if (-not (Test-Path $pythonExe)) {
     $pythonExe = "python"
 }
+
 Push-Location "$ProjectRoot\backend"
+
 try {
     & $pythonExe "app/seed_demo_users.py"
-} catch {
+
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warning "Demo user seeding returned exit code $LASTEXITCODE"
+    }
+}
+catch {
     Write-Warning "User seeding completed with notices: $_"
-} finally {
+}
+finally {
     Pop-Location
 }
 
@@ -71,13 +103,27 @@ try {
 Write-Host "`n[4/4] Starting FastAPI backend and Vue frontend..." -ForegroundColor Yellow
 
 # Start FastAPI
-$backendProc = Start-Process -FilePath $pythonExe -ArgumentList "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "8000", "--reload" -WorkingDirectory "$ProjectRoot\backend" -PassThru -WindowStyle Hidden
+$backendProc = Start-Process `
+    -FilePath $pythonExe `
+    -ArgumentList "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "8000", "--reload" `
+    -WorkingDirectory "$ProjectRoot\backend" `
+    -PassThru `
+    -WindowStyle Hidden
+
 $SpawnedPids += $backendProc.Id
+
 Write-Host "  [OK] FastAPI backend started (PID: $($backendProc.Id)) -> http://127.0.0.1:8000" -ForegroundColor Green
 
 # Start Vite Frontend
-$frontendProc = Start-Process -FilePath "npm.cmd" -ArgumentList "run", "dev" -WorkingDirectory "$ProjectRoot\frontend" -PassThru -WindowStyle Hidden
+$frontendProc = Start-Process `
+    -FilePath "npm.cmd" `
+    -ArgumentList "run", "dev" `
+    -WorkingDirectory "$ProjectRoot\frontend" `
+    -PassThru `
+    -WindowStyle Hidden
+
 $SpawnedPids += $frontendProc.Id
+
 Write-Host "  [OK] Vite dev server started (PID: $($frontendProc.Id)) -> http://localhost:5173" -ForegroundColor Green
 
 # Save PIDs
