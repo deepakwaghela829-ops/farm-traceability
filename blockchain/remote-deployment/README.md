@@ -44,18 +44,20 @@ curl -fsSL -o setup-remote-ganache.sh https://raw.githubusercontent.com/deepakwa
 # Make executable
 chmod +x setup-remote-ganache.sh
 
-# Run provisioning (optionally pass a custom token and your domain name):
-# ./setup-remote-ganache.sh <OPTIONAL_CUSTOM_TOKEN> <OPTIONAL_DOMAIN>
+# Run provisioning (optionally pass a domain name or custom token):
+# ./setup-remote-ganache.sh --domain ganache.yourdomain.com
 ./setup-remote-ganache.sh
 ```
 
 The script automatically:
 * Installs Node.js 20 LTS, Nginx, UFW, Certbot, and pins `ganache@7.9.2`.
+* Generates a **unique, fresh demo mnemonic** on the fly (or accepts an existing one via `--mnemonic`), storing it securely in `/etc/ganache/ganache.env` (`chmod 600`, owned by `ganache`).
 * Creates a dedicated non-root `ganache` system user.
 * Configures persistent disk storage at `/var/lib/ganache/data`.
 * Creates and starts `ganache.service` with automatic restart on boot.
 * Sets up Nginx reverse proxy with Bearer token authentication.
 * Hardens the UFW firewall: blocks port 8545 externally, only allowing ports 22, 80, 443.
+* Derives the 5 demo role wallet addresses and outputs the deployer private key for contract deployment.
 
 ---
 
@@ -71,31 +73,38 @@ Certbot will automatically install the TLS certificate and configure HTTPS redir
 ---
 
 ## Step 4: Deploy the Smart Contract to the Remote Ganache
-From your local project machine, deploy `CropRegistry.sol` to the remote Ganache:
+From your local project machine, deploy `CropRegistry.sol` to the remote Ganache using the deployer private key output from Step 2:
 
 ```bash
 cd blockchain
-node scripts/deploy-remote.js https://ganache.yourdomain.com YOUR_RPC_BEARER_TOKEN
+node scripts/deploy-remote.js https://ganache.yourdomain.com YOUR_RPC_BEARER_TOKEN YOUR_DEPLOYER_PRIVATE_KEY
 ```
 
 The script will:
 1. Connect to your remote Ganache node.
-2. Deploy the `CropRegistry` smart contract from deterministic account 0 (`0xfe3b557e8fb62b89f4916b721be55ceb828dbd73`).
-3. Save the deployment metadata and sync contract addresses to `deployment-info.json` and `frontend/blockchain/`.
-4. Output the new contract address (e.g. `0x...`).
+2. Verify Chain ID 1337.
+3. Deploy the `CropRegistry` smart contract from the newly generated Account 0.
+4. Save the deployment metadata and sync contract addresses to `deployment-info.json` and `frontend/blockchain/`.
+5. Output the new contract address (e.g. `0x...`).
 
 ---
 
 ## Step 5: Configure Vercel Backend Environment Variables
-Go to your Vercel Dashboard for `farm-traceability-backend`:
-**Settings > Environment Variables**, and add/update:
+Go to your Vercel Dashboard for `farm-traceability-backend` (**Settings > Environment Variables**) or use Vercel CLI:
 
-| Variable Name | Value | Target Environments |
-| :--- | :--- | :--- |
-| `GANACHE_RPC_URL` | `https://ganache.yourdomain.com` | Production, Preview |
-| `GANACHE_RPC_TOKEN` | `YOUR_RPC_BEARER_TOKEN` | Production, Preview |
-| `GANACHE_CHAIN_ID` | `1337` | Production, Preview |
-| `GANACHE_CONTRACT_ADDRESS` | `0x...` (Contract address from Step 4) | Production, Preview |
+```bash
+cd backend
+vercel env add GANACHE_RPC_URL production --value "https://ganache.yourdomain.com"
+vercel env add GANACHE_RPC_TOKEN production --value "YOUR_RPC_BEARER_TOKEN"
+vercel env add GANACHE_CHAIN_ID production --value "1337"
+vercel env add GANACHE_CONTRACT_ADDRESS production --value "0x..."
+vercel env add DEMO_FARMER_WALLET production --value "0x..."
+vercel env add DEMO_SUPPLIER_WALLET production --value "0x..."
+vercel env add DEMO_RETAILER_WALLET production --value "0x..."
+vercel env add DEMO_CONSUMER_WALLET production --value "0x..."
+vercel env add DEMO_ADMIN_WALLET production --value "0x..."
+vercel --prod --yes
+```
 
 *Note: None of these variables use `VITE_`, keeping your RPC secret and contract deployment details securely on the server.*
 

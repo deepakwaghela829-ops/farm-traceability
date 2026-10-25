@@ -3,20 +3,18 @@ const fs = require('fs');
 const path = require('path');
 const { ethers } = require('ethers');
 
-// Load environment variables or CLI flags
+// Load environment variables
 require('dotenv').config();
 
 const REMOTE_URL = process.env.GANACHE_REMOTE_URL || process.argv[2];
 const RPC_TOKEN = process.env.GANACHE_RPC_TOKEN || process.argv[3] || '';
 const DEPLOYER_PRIVATE_KEY = process.env.DEPLOYER_PRIVATE_KEY || process.argv[4];
-
-// Default deterministic mnemonic for Ganache accounts
-const DEFAULT_MNEMONIC = 'myth like bonus scare over problem client lizard pioneer submit female collect';
+const MNEMONIC = process.env.GANACHE_MNEMONIC || process.argv[5];
 
 async function main() {
   if (!REMOTE_URL) {
-    console.error('Usage: node deploy-remote.js <GANACHE_REMOTE_URL> [GANACHE_RPC_TOKEN] [DEPLOYER_PRIVATE_KEY]');
-    console.error('Example: node deploy-remote.js https://ganache.example.com my-secret-token');
+    console.error('Usage: node deploy-remote.js <GANACHE_REMOTE_URL> [GANACHE_RPC_TOKEN] [DEPLOYER_PRIVATE_KEY_OR_MNEMONIC]');
+    console.error('Example: node deploy-remote.js https://ganache.example.com my-secret-token 0xabcdef...');
     process.exit(1);
   }
 
@@ -47,12 +45,29 @@ async function main() {
 
   // 2. Resolve Deployer Signer
   let wallet;
-  if (DEPLOYER_PRIVATE_KEY) {
+  if (DEPLOYER_PRIVATE_KEY && DEPLOYER_PRIVATE_KEY.startsWith('0x')) {
     wallet = new ethers.Wallet(DEPLOYER_PRIVATE_KEY, provider);
+  } else if (DEPLOYER_PRIVATE_KEY && DEPLOYER_PRIVATE_KEY.split(' ').length >= 12) {
+    const hd = ethers.HDNodeWallet.fromPhrase(DEPLOYER_PRIVATE_KEY);
+    wallet = new ethers.Wallet(hd.privateKey, provider);
+  } else if (MNEMONIC) {
+    const hd = ethers.HDNodeWallet.fromPhrase(MNEMONIC);
+    wallet = new ethers.Wallet(hd.privateKey, provider);
   } else {
-    // Derive Account 0 from the deterministic mnemonic
-    const mnemonicWallet = ethers.HDNodeWallet.fromPhrase(DEFAULT_MNEMONIC);
-    wallet = new ethers.Wallet(mnemonicWallet.privateKey, provider);
+    // If running against an open Ganache RPC with unlocked accounts
+    try {
+      const accounts = await provider.listAccounts();
+      if (accounts && accounts.length > 0) {
+        wallet = await provider.getSigner(0);
+        console.log(`Using remote unlocked Account 0: ${wallet.address}`);
+      } else {
+        throw new Error('No unlocked accounts returned');
+      }
+    } catch {
+      throw new Error(
+        'Deployer credentials required. Pass DEPLOYER_PRIVATE_KEY or GANACHE_MNEMONIC as argument or environment variable.'
+      );
+    }
   }
 
   const balance = await provider.getBalance(wallet.address);

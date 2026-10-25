@@ -17,45 +17,120 @@ CHAIN_ID="1337"
 RPC_LOCAL_PORT="8545"
 DATA_DIR="/var/lib/ganache/data"
 GANACHE_USER="ganache"
-MNEMONIC="myth like bonus scare over problem client lizard pioneer submit female collect"
+CONFIG_DIR="/etc/ganache"
+ENV_FILE="${CONFIG_DIR}/ganache.env"
 
-# Generate or accept custom bearer token
-TOKEN="${1:-$(openssl rand -hex 24)}"
-DOMAIN="${2:-}"
+# Flags
+DOMAIN=""
+CUSTOM_TOKEN=""
+CUSTOM_MNEMONIC=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --domain)
+      DOMAIN="$2"
+      shift 2
+      ;;
+    --token)
+      CUSTOM_TOKEN="$2"
+      shift 2
+      ;;
+    --mnemonic)
+      CUSTOM_MNEMONIC="$2"
+      shift 2
+      ;;
+    *)
+      # Positional fallback: $1 = token, $2 = domain
+      if [ -z "${CUSTOM_TOKEN}" ]; then
+        CUSTOM_TOKEN="$1"
+      elif [ -z "${DOMAIN}" ]; then
+        DOMAIN="$1"
+      fi
+      shift
+      ;;
+  esac
+done
+
+TOKEN="${CUSTOM_TOKEN:-$(openssl rand -hex 24)}"
 
 echo "[*] Assigned Chain ID: ${CHAIN_ID}"
 echo "[*] Pinned Ganache CLI Version: ${GANACHE_VERSION}"
 echo "[*] Local Bind Port: 127.0.0.1:${RPC_LOCAL_PORT}"
-echo "[*] Generated RPC Bearer Token: ${TOKEN}"
 
 # 2. Update System Packages & Install Dependencies
-echo "`n[1/7] Updating system packages..."
+echo -e "\n[1/7] Updating system packages..."
 apt-get update -y
 apt-get install -y curl ufw nginx certbot python3-certbot-nginx build-essential
 
-# 3. Install Node.js 20 LTS & Ganache CLI
-echo "`n[2/7] Installing Node.js 20 LTS & Ganache CLI v${GANACHE_VERSION}..."
+# 3. Install Node.js 20 LTS, Ganache CLI & ethers for wallet derivation
+echo -e "\n[2/7] Installing Node.js 20 LTS, Ganache CLI v${GANACHE_VERSION} & ethers..."
 if ! command -v node >/dev/null 2>&1; then
     curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
     apt-get install -y nodejs
 fi
 
-npm install -g "ganache@${GANACHE_VERSION}"
+npm install -g "ganache@${GANACHE_VERSION}" "ethers@6"
+NODE_GLOBAL_PATH="$(npm root -g)"
+export NODE_PATH="${NODE_GLOBAL_PATH}:${NODE_PATH:-}"
 echo "  [OK] Installed $(ganache --version)"
 
 # 4. Create Dedicated Non-Root System User & Persistent Directory
-echo "`n[3/7] Setting up dedicated non-root user and persistent disk storage..."
+echo -e "\n[3/7] Setting up dedicated non-root user and persistent disk storage..."
 if ! id "${GANACHE_USER}" >/dev/null 2>&1; then
     useradd --system --shell /usr/sbin/nologin --home-dir /var/lib/ganache "${GANACHE_USER}"
 fi
 
 mkdir -p "${DATA_DIR}"
+mkdir -p "${CONFIG_DIR}"
 chown -R "${GANACHE_USER}:${GANACHE_USER}" /var/lib/ganache
 chmod 700 /var/lib/ganache
 chmod 700 "${DATA_DIR}"
 
-# 5. Create Systemd Service for Auto-Restart & Persistence
-echo "`n[4/7] Configuring systemd service /etc/systemd/system/ganache.service..."
+# 5. Generate or Load Unique Demo Mnemonic (Never commited to git)
+echo -e "\n[4/7] Configuring secure unique wallet configuration..."
+if [ -n "${CUSTOM_MNEMONIC}" ]; then
+    MNEMONIC="${CUSTOM_MNEMONIC}"
+elif [ -f "${ENV_FILE}" ] && grep -q "GANACHE_MNEMONIC" "${ENV_FILE}"; then
+    echo "  [*] Existing configuration found at ${ENV_FILE}. Preserving current chain mnemonic."
+    MNEMONIC="$(grep "^GANACHE_MNEMONIC=" "${ENV_FILE}" | cut -d'=' -f2- | tr -d '\"')"
+else
+    echo "  [*] Generating unique, random 12-word demo mnemonic..."
+    MNEMONIC="$(NODE_PATH="${NODE_GLOBAL_PATH}" node -e "const { ethers } = require('ethers'); console.log(ethers.Wallet.createRandom().mnemonic.phrase);")"
+fi
+
+cat <<EOF > "${ENV_FILE}"
+# AgriTrace OS - Ganache Node Secrets
+# DO NOT COMMIT OR EXPOSE THIS FILE
+GANACHE_MNEMONIC="${MNEMONIC}"
+GANACHE_RPC_TOKEN="${TOKEN}"
+EOF
+
+chown "${GANACHE_USER}:${GANACHE_USER}" "${ENV_FILE}"
+chmod 600 "${ENV_FILE}"
+
+# Derive demo role accounts
+WALLET_INFO="$(NODE_PATH="${NODE_GLOBAL_PATH}" node -e "
+const { ethers } = require('ethers');
+const m = process.argv[1];
+const hd0 = ethers.HDNodeWallet.fromPhrase(m);
+console.log('FARMER_ADDR=' + hd0.address);
+console.log('DEPLOYER_PK=' + hd0.privateKey);
+for(let i=1; i<5; i++) {
+  const w = ethers.HDNodeWallet.fromPhrase(m, '', \"m/44'/60'/0'/0/\" + i);
+  const roles = ['FARMER', 'SUPPLIER', 'RETAILER', 'CONSUMER', 'ADMIN'];
+  console.log(roles[i] + '_ADDR=' + w.address);
+}
+" "${MNEMONIC}")"
+
+FARMER_ADDR="$(echo "${WALLET_INFO}" | grep "^FARMER_ADDR=" | cut -d'=' -f2)"
+DEPLOYER_PK="$(echo "${WALLET_INFO}" | grep "^DEPLOYER_PK=" | cut -d'=' -f2)"
+SUPPLIER_ADDR="$(echo "${WALLET_INFO}" | grep "^SUPPLIER_ADDR=" | cut -d'=' -f2)"
+RETAILER_ADDR="$(echo "${WALLET_INFO}" | grep "^RETAILER_ADDR=" | cut -d'=' -f2)"
+CONSUMER_ADDR="$(echo "${WALLET_INFO}" | grep "^CONSUMER_ADDR=" | cut -d'=' -f2)"
+ADMIN_ADDR="$(echo "${WALLET_INFO}" | grep "^ADMIN_ADDR=" | cut -d'=' -f2)"
+
+# 6. Create Systemd Service for Auto-Restart & Persistence
+echo -e "\n[5/7] Configuring systemd service /etc/systemd/system/ganache.service..."
 GANACHE_BIN="$(which ganache)"
 
 cat <<EOF > /etc/systemd/system/ganache.service
@@ -68,13 +143,14 @@ Type=simple
 User=${GANACHE_USER}
 Group=${GANACHE_USER}
 WorkingDirectory=/var/lib/ganache
+EnvironmentFile=${ENV_FILE}
 ExecStart=${GANACHE_BIN} \\
   --server.host 127.0.0.1 \\
   --server.port ${RPC_LOCAL_PORT} \\
   --database.dbPath ${DATA_DIR} \\
   --chain.chainId ${CHAIN_ID} \\
   --chain.networkId ${CHAIN_ID} \\
-  --wallet.mnemonic "${MNEMONIC}" \\
+  --wallet.mnemonic "\${GANACHE_MNEMONIC}" \\
   --wallet.totalAccounts 10 \\
   --wallet.defaultBalance 100 \\
   --miner.blockTime 0
@@ -98,8 +174,8 @@ else
     exit 1
 fi
 
-# 6. Configure Nginx Reverse Proxy with Token Authentication
-echo "`n[5/7] Configuring Nginx reverse proxy with Bearer token authentication..."
+# 7. Configure Nginx Reverse Proxy with Token Authentication
+echo -e "\n[6/7] Configuring Nginx reverse proxy with Bearer token authentication..."
 
 cat <<'EOF' > /etc/nginx/sites-available/ganache
 server {
@@ -144,8 +220,16 @@ nginx -t
 systemctl restart nginx
 echo "  [OK] Nginx configured and restarted."
 
-# 7. Configure UFW Firewall (Port 8545 strictly internal)
-echo "`n[6/7] Hardening firewall with UFW (blocking raw 8545 from public internet)..."
+# Configure TLS with Certbot if domain was provided
+if [ -n "${DOMAIN}" ]; then
+    echo "  [*] Configuring SSL certificate for domain: ${DOMAIN}..."
+    certbot --nginx -d "${DOMAIN}" --non-interactive --agree-tos -m "admin@${DOMAIN}" --redirect || {
+        echo "  [!] Notice: Certbot SSL setup did not complete. Ensure DNS points to this server and re-run certbot."
+    }
+fi
+
+# 8. Configure UFW Firewall (Port 8545 strictly internal)
+echo -e "\n[7/7] Hardening firewall with UFW (blocking raw 8545 from public internet)..."
 ufw default deny incoming
 ufw default allow outgoing
 ufw allow 22/tcp comment 'SSH'
@@ -154,8 +238,8 @@ ufw allow 443/tcp comment 'HTTPS'
 ufw --force enable
 echo "  [OK] UFW active. Port 8545 is blocked externally and only accessible via Nginx."
 
-# 8. Verification & Summary
-echo "`n[7/7] Testing local authenticated RPC call..."
+# 9. Verification & Summary
+echo -e "\nTesting local authenticated RPC call..."
 TEST_CALL=$(curl -s -X POST http://127.0.0.1 \
   -H "Authorization: Bearer ${TOKEN}" \
   -H "Content-Type: application/json" \
@@ -163,21 +247,41 @@ TEST_CALL=$(curl -s -X POST http://127.0.0.1 \
 
 echo "  RPC Response: ${TEST_CALL}"
 
-echo "`n=================================================================="
+PUBLIC_HOST="${DOMAIN:-<YOUR_VPS_PUBLIC_IP>}"
+SCHEME="http"
+[ -n "${DOMAIN}" ] && SCHEME="https"
+
+echo ""
+echo "=================================================================="
 echo " [SUCCESS] Remote Ganache EVM Node is Ready!"
 echo "=================================================================="
-echo "  RPC Port (local): 127.0.0.1:${RPC_LOCAL_PORT}"
+echo "  RPC Endpoint    : ${SCHEME}://${PUBLIC_HOST}"
 echo "  Chain ID        : ${CHAIN_ID}"
-echo "  Authentication  : Bearer Token"
-echo "  RPC Token       : ${TOKEN}"
+echo "  RPC Auth Token  : ${TOKEN}"
+echo "  Deployer Key    : ${DEPLOYER_PK}"
 echo ""
-echo "Next Steps for HTTPS Domain & Vercel Connection:"
-echo "1. Point your domain or subdomain (e.g. ganache.yourdomain.com) to this VPS IP."
-echo "2. Run Certbot for automatic SSL certificate:"
-echo "   certbot --nginx -d ganache.yourdomain.com"
-echo "3. Add these Environment Variables to your Vercel Backend project:"
-echo "   GANACHE_RPC_URL=https://ganache.yourdomain.com"
-echo "   GANACHE_RPC_TOKEN=${TOKEN}"
-echo "   GANACHE_CHAIN_ID=${CHAIN_ID}"
-echo "4. Deploy the CropRegistry contract using 'node blockchain/scripts/deploy-remote.js'"
+echo "  Mapped Demo Account Addresses:"
+echo "    farmer1   (Account 0): ${FARMER_ADDR}"
+echo "    supplier1 (Account 1): ${SUPPLIER_ADDR}"
+echo "    retailer1 (Account 2): ${RETAILER_ADDR}"
+echo "    consumer1 (Account 3): ${CONSUMER_ADDR}"
+echo "    admin1    (Account 4): ${ADMIN_ADDR}"
+echo ""
+echo "=== Required Next Steps ==="
+echo "1. Deploy the smart contract from your local machine:"
+echo "   cd blockchain"
+echo "   node scripts/deploy-remote.js ${SCHEME}://${PUBLIC_HOST} \"${TOKEN}\" \"${DEPLOYER_PK}\""
+echo ""
+echo "2. Add Environment Variables to your Vercel Backend:"
+echo "   cd backend"
+echo "   vercel env add GANACHE_RPC_URL production --value \"${SCHEME}://${PUBLIC_HOST}\""
+echo "   vercel env add GANACHE_RPC_TOKEN production --value \"${TOKEN}\""
+echo "   vercel env add GANACHE_CHAIN_ID production --value \"${CHAIN_ID}\""
+echo "   vercel env add GANACHE_CONTRACT_ADDRESS production --value \"<DEPLOYED_CONTRACT_ADDRESS>\""
+echo "   vercel env add DEMO_FARMER_WALLET production --value \"${FARMER_ADDR}\""
+echo "   vercel env add DEMO_SUPPLIER_WALLET production --value \"${SUPPLIER_ADDR}\""
+echo "   vercel env add DEMO_RETAILER_WALLET production --value \"${RETAILER_ADDR}\""
+echo "   vercel env add DEMO_CONSUMER_WALLET production --value \"${CONSUMER_ADDR}\""
+echo "   vercel env add DEMO_ADMIN_WALLET production --value \"${ADMIN_ADDR}\""
+echo "   vercel --prod --yes"
 echo "=================================================================="

@@ -14,43 +14,46 @@ from app.models.crop import Crop
 from app.models.user import User
 from app.services.auth_service import hash_password
 
-DEFAULT_DEMO_USERS = [
-    {
-        "username": "farmer1",
-        "email": "farmer1@agritrace.local",
-        "role": "FARMER",
-        "full_name": "Ramesh Patel (Farmer)",
-        "wallet_address": "0xfe3b557e8fb62b89f4916b721be55ceb828dbd73",
-    },
-    {
-        "username": "supplier1",
-        "email": "supplier1@agritrace.local",
-        "role": "SUPPLIER",
-        "full_name": "Gujarat Agro Logistics (Supplier)",
-        "wallet_address": "0xf17f52151EbEF6C7334FAD080c5704D77216b732",
-    },
-    {
-        "username": "retailer1",
-        "email": "retailer1@agritrace.local",
-        "role": "RETAILER",
-        "full_name": "Apex Organic Mart (Retailer)",
-        "wallet_address": "0xC5fdf4076b8F3A5357c5E395ab970B5B54098Fef",
-    },
-    {
-        "username": "consumer1",
-        "email": "consumer1@agritrace.local",
-        "role": "CONSUMER",
-        "full_name": "Ananya Sharma (Consumer)",
-        "wallet_address": "0x821aEa9a577a9b44299B9c15c88cf3087F3b5544",
-    },
-    {
-        "username": "admin1",
-        "email": "admin1@agritrace.local",
-        "role": "ADMIN",
-        "full_name": "System Auditor (Admin)",
-        "wallet_address": "0x0d1d4e623D10F9FBA5Db95830F7d3839406C6AF2",
-    },
-]
+def get_demo_users():
+    return [
+        {
+            "username": "farmer1",
+            "email": "farmer1@agritrace.local",
+            "role": "FARMER",
+            "full_name": "Ramesh Patel (Farmer)",
+            "wallet_address": os.getenv("DEMO_FARMER_WALLET", "0xfe3b557e8fb62b89f4916b721be55ceb828dbd73"),
+        },
+        {
+            "username": "supplier1",
+            "email": "supplier1@agritrace.local",
+            "role": "SUPPLIER",
+            "full_name": "Gujarat Agro Logistics (Supplier)",
+            "wallet_address": os.getenv("DEMO_SUPPLIER_WALLET", "0xf17f52151EbEF6C7334FAD080c5704D77216b732"),
+        },
+        {
+            "username": "retailer1",
+            "email": "retailer1@agritrace.local",
+            "role": "RETAILER",
+            "full_name": "Apex Organic Mart (Retailer)",
+            "wallet_address": os.getenv("DEMO_RETAILER_WALLET", "0xC5fdf4076b8F3A5357c5E395ab970B5B54098Fef"),
+        },
+        {
+            "username": "consumer1",
+            "email": "consumer1@agritrace.local",
+            "role": "CONSUMER",
+            "full_name": "Ananya Sharma (Consumer)",
+            "wallet_address": os.getenv("DEMO_CONSUMER_WALLET", "0x821aEa9a577a9b44299B9c15c88cf3087F3b5544"),
+        },
+        {
+            "username": "admin1",
+            "email": "admin1@agritrace.local",
+            "role": "ADMIN",
+            "full_name": "System Auditor (Admin)",
+            "wallet_address": os.getenv("DEMO_ADMIN_WALLET", "0x0d1d4e623D10F9FBA5Db95830F7d3839406C6AF2"),
+        },
+    ]
+
+DEFAULT_DEMO_USERS = get_demo_users()
 
 DEFAULT_DEMO_CROPS = [
     {
@@ -153,7 +156,12 @@ def seed_users(target_engine=None, target_sessionmaker=None):
                 print(f"[+] Created demo user: {user_data['username']} (Role: {user_data['role']})")
             else:
                 existing_count += 1
-                print(f"[-] Existing demo user: {user_data['username']} (Role: {existing.role})")
+                if user_data.get("wallet_address") and existing.wallet_address != user_data["wallet_address"]:
+                    old_wallet = existing.wallet_address
+                    existing.wallet_address = user_data["wallet_address"]
+                    print(f"[*] Synchronized wallet for demo user {user_data['username']}: {old_wallet} -> {existing.wallet_address}")
+                else:
+                    print(f"[-] Existing demo user: {user_data['username']} (Role: {existing.role})")
 
         # Seed Crops if empty
         crop_count = session.query(Crop).count()
