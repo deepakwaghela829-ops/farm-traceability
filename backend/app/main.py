@@ -12,8 +12,10 @@ from fastapi.responses import JSONResponse
 from app.api.routes.auth import router as auth_router
 from app.api.routes.crops import router as crops_router
 from app.api.routes.transactions import router as transactions_router
+from app.api.routes.blockchain import router as blockchain_router
 from app.ai.routes import router as prediction_router
 from app.config import get_settings
+from app.db import check_database_health
 
 logger = logging.getLogger("app.main")
 settings = get_settings()
@@ -113,6 +115,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 app.include_router(auth_router)
 app.include_router(crops_router)
 app.include_router(transactions_router)
+app.include_router(blockchain_router)
 app.include_router(prediction_router)
 
 
@@ -146,5 +149,10 @@ def startup_event():
 
 
 @app.get("/health")
-def health() -> dict[str, str]:
-    return {"status": "ok"}
+def health() -> dict:
+    db_health = check_database_health()
+    return {
+        "status": "ok" if db_health.get("connected") else "degraded",
+        "service": "AgriTrace OS Backend",
+        "database": db_health,
+    }

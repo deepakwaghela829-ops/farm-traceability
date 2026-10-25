@@ -52,6 +52,32 @@ fallback_engine = create_engine(
 FallbackSessionLocal = sessionmaker(bind=fallback_engine, autocommit=False, autoflush=False, expire_on_commit=False)
 
 
+def check_database_health() -> dict:
+    if _db_url.startswith("sqlite"):
+        return {
+            "primary": "SQLite",
+            "connected": True,
+            "storage_mode": "persistent_local",
+            "notice": "Operating on persistent local SQLite database",
+        }
+    try:
+        with primary_engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        return {
+            "primary": "PostgreSQL (Supabase)",
+            "connected": True,
+            "storage_mode": "persistent",
+            "notice": "Connected to persistent cloud PostgreSQL",
+        }
+    except Exception as exc:
+        return {
+            "primary": "PostgreSQL (Supabase)",
+            "connected": False,
+            "storage_mode": "ephemeral_fallback",
+            "notice": f"Cloud PostgreSQL is paused or unreachable ({type(exc).__name__}). Operating on temporary serverless fallback (/tmp). Data will not persist permanently across restarts until Supabase is unpaused.",
+        }
+
+
 def get_db() -> Generator[Session, None, None]:
     session = None
     use_fallback = False

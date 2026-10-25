@@ -1,4 +1,4 @@
-﻿from datetime import date, datetime
+from datetime import date, datetime
 from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -67,3 +67,6 @@ class CropRead(BaseModel):
 
     created_at: datetime
     updated_at: datetime
+
+    storage_mode: str | None = Field(default="persistent", description="Durability mode: persistent (Supabase) or ephemeral_fallback (/tmp)")
+    storage_warning: str | None = Field(default=None, description="Explicit warning if stored in non-persistent fallback storage")

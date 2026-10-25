@@ -11,6 +11,12 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 1440
 
+    # Remote Ganache EVM Configuration
+    ganache_rpc_url: str = "http://127.0.0.1:7545"
+    ganache_rpc_token: str = ""
+    ganache_chain_id: int = 1337
+    ganache_contract_address: str = "0xb524d5e1329F405f004720C5FcD4F023916c64F3"
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     @property

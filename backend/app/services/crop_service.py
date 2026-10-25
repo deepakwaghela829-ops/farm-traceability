@@ -24,6 +24,17 @@ def create_crop(db: Session, payload: CropCreate) -> Crop:
     except Exception as err:
         logger.warning(f"Could not auto-generate prediction for crop {crop.crop_id}: {err}")
 
+    # Explicitly track whether the record was saved to permanent PostgreSQL or temporary fallback
+    from app.db import check_database_health
+    db_health = check_database_health()
+    if db_health.get("storage_mode") == "ephemeral_fallback":
+        crop.storage_mode = "ephemeral_fallback"
+        crop.storage_warning = db_health.get("notice")
+        logger.warning(f"Crop #{crop.crop_id} saved to ephemeral fallback storage (/tmp). Record is NOT permanent.")
+    else:
+        crop.storage_mode = "persistent"
+        crop.storage_warning = None
+
     return crop
 
 
@@ -40,4 +51,3 @@ def get_crop_by_id(db: Session, crop_id: int) -> Crop | None:
     if crop:
         return crop
     return db.scalars(select(Crop).where(Crop.blockchain_crop_id == crop_id)).first()
-
