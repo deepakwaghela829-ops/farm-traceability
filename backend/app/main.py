@@ -1,4 +1,5 @@
 import logging
+import os
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.encoders import jsonable_encoder
 from fastapi.exception_handlers import (
@@ -121,31 +122,41 @@ app.include_router(prediction_router)
 
 @app.on_event("startup")
 def startup_event():
-    # 1. Primary DB initialization attempt
+    is_serverless = bool(os.getenv("VERCEL"))
+    sync_requested = os.getenv("SYNC_DEMO_ACCOUNTS", "").strip().lower() in ("true", "1", "yes")
+
+    if is_serverless:
+        # On serverless (Vercel): prevent latency spikes and cold-start timeouts.
+        # Skip repeated Base.metadata.create_all and synchronous AI model loading.
+        # Only perform explicit demo account synchronization when specifically requested.
+        if sync_requested:
+            try:
+                from app.db import PrimarySessionLocal, _db_url
+                if not _db_url.startswith("sqlite"):
+                    with PrimarySessionLocal() as session:
+                        from app.seed_demo_users import sync_designated_demo_users
+                        sync_res = sync_designated_demo_users(session)
+                        logger.info("Serverless demo accounts synchronized: %s", sync_res)
+            except Exception as exc:
+                logger.warning("Serverless demo account sync notice: %s", exc)
+        return
+
+    # Local development & viva environment initialization
     try:
         from app.db import Base, primary_engine, PrimarySessionLocal
         Base.metadata.create_all(bind=primary_engine, checkfirst=True)
         from app.seed_demo_users import seed_users
-        seed_users(target_engine=primary_engine, target_sessionmaker=PrimarySessionLocal)
+        seed_users(target_engine=primary_engine, target_sessionmaker=PrimarySessionLocal, sync_passwords=sync_requested)
     except Exception as exc:
-        logger.warning("Primary database startup check notice: %s", exc)
+        logger.warning("Primary database local startup notice: %s", exc)
 
-    # 2. Resilient fallback database initialization
     try:
         from app.db import Base, fallback_engine, FallbackSessionLocal
         Base.metadata.create_all(bind=fallback_engine, checkfirst=True)
         from app.seed_demo_users import seed_users
-        seed_users(target_engine=fallback_engine, target_sessionmaker=FallbackSessionLocal)
+        seed_users(target_engine=fallback_engine, target_sessionmaker=FallbackSessionLocal, sync_passwords=sync_requested)
     except Exception as exc:
-        logger.warning("Fallback database startup check notice: %s", exc)
-
-    # 3. Model benchmarks warmup
-    try:
-        from app.ai.predictor import get_model, get_market_benchmarks
-        get_model()
-        get_market_benchmarks()
-    except Exception:
-        pass
+        logger.warning("Fallback database local startup notice: %s", exc)
 
 
 @app.get("/health")

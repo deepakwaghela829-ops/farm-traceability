@@ -105,3 +105,70 @@ def test_auth_role_authorization_admin_protection(auth_client):
     admin_res = auth_client.get("/api/auth/users", headers={"Authorization": f"Bearer {token}"})
     assert admin_res.status_code == 403
 
+
+def test_sync_demo_accounts_endpoint_unauthorized(auth_client):
+    # No auth header -> 401
+    res = auth_client.post("/api/auth/sync-demo-accounts")
+    assert res.status_code == 401
+    assert "detail" in res.json()
+
+    # Wrong token -> 401
+    res_wrong = auth_client.post("/api/auth/sync-demo-accounts", headers={"X-Sync-Token": "invalid_wrong_token"})
+    assert res_wrong.status_code == 401
+
+
+def test_sync_demo_accounts_endpoint_authorized(auth_client, monkeypatch):
+    import os
+    monkeypatch.setenv("SYNC_DEMO_TOKEN", "secure_test_sync_token_32chars_long")
+
+    # Call with correct token
+    res = auth_client.post(
+        "/api/auth/sync-demo-accounts",
+        headers={"X-Sync-Token": "secure_test_sync_token_32chars_long"},
+    )
+    assert res.status_code == 200
+    data = res.json()
+    assert data["status"] == "success"
+    assert "synchronized" in data
+    assert "farmer1" in data["synchronized"]["updated"] or "farmer1" in data["synchronized"]["verified"]
+
+    # Verify all 5 demo accounts can now log in with Demo12345!
+    for username in ["farmer1", "supplier1", "retailer1", "consumer1", "admin1"]:
+        login_res = auth_client.post("/api/auth/login", json={"username": username, "password": "Demo12345!"})
+        assert login_res.status_code == 200, f"Login failed for {username}"
+        assert login_res.json()["user"]["username"] == username
+
+
+def test_sync_designated_demo_users_leaves_other_users_intact(auth_client):
+    from sqlalchemy.orm import Session
+    from app.models.user import User
+    from app.seed_demo_users import sync_designated_demo_users
+
+    # Create a custom non-demo user
+    res = auth_client.post(
+        "/api/auth/register",
+        json={
+            "username": "custom_farmer",
+            "email": "custom@farm.org",
+            "password": "MySecretCustomPassword123!",
+            "role": "FARMER",
+        },
+    )
+    assert res.status_code == 201
+
+    # Sync designated demo accounts
+    from app.config import get_settings
+    res_sync = auth_client.post(
+        "/api/auth/sync-demo-accounts",
+        headers={"X-Sync-Token": get_settings().jwt_secret},
+    )
+    assert res_sync.status_code == 200
+
+    # Verify custom non-demo user was NOT modified and can still log in with original password
+    login_custom = auth_client.post(
+        "/api/auth/login",
+        json={"username": "custom_farmer", "password": "MySecretCustomPassword123!"},
+    )
+    assert login_custom.status_code == 200
+    assert login_custom.json()["user"]["username"] == "custom_farmer"
+

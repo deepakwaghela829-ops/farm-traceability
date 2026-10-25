@@ -1,4 +1,5 @@
 from datetime import date
+import logging
 import os
 from pathlib import Path
 import sys
@@ -9,10 +10,16 @@ if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 from sqlalchemy import select
+from sqlalchemy.orm import Session
 from app.db import Base, SessionLocal, engine
 from app.models.crop import Crop
 from app.models.user import User
-from app.services.auth_service import hash_password
+from app.services.auth_service import hash_password, verify_password
+
+logger = logging.getLogger("app.seed")
+
+DESIGNATED_DEMO_USERNAMES = {"farmer1", "supplier1", "retailer1", "consumer1", "admin1"}
+
 
 def get_demo_users():
     return [
@@ -52,6 +59,7 @@ def get_demo_users():
             "wallet_address": os.getenv("DEMO_ADMIN_WALLET", "0x0d1d4e623D10F9FBA5Db95830F7d3839406C6AF2"),
         },
     ]
+
 
 DEFAULT_DEMO_USERS = get_demo_users()
 
@@ -119,65 +127,118 @@ DEFAULT_DEMO_CROPS = [
 ]
 
 
-def seed_users(target_engine=None, target_sessionmaker=None):
+def sync_designated_demo_users(session: Session, demo_password: str | None = None) -> dict:
+    """
+    Explicitly synchronizes ONLY the five designated demo accounts in the database.
+    Updates password hash, wallet address, role, and full name for designated accounts.
+    Never modifies, overwrites, or deletes any other user accounts.
+    Never logs passwords or hashes.
+    """
+    effective_password = demo_password or os.getenv("DEMO_PASSWORD", "Demo12345!")
+    results = {"created": [], "updated": [], "verified": []}
+
+    for user_data in DEFAULT_DEMO_USERS:
+        username = user_data["username"]
+        if username not in DESIGNATED_DEMO_USERNAMES:
+            continue
+
+        user = session.scalars(select(User).where(User.username == username)).first()
+        if not user:
+            user = User(
+                username=username,
+                email=user_data["email"],
+                hashed_password=hash_password(effective_password),
+                role=user_data["role"],
+                full_name=user_data["full_name"],
+                wallet_address=user_data.get("wallet_address"),
+            )
+            session.add(user)
+            results["created"].append(username)
+        else:
+            changed = False
+            # Update password hash only if it does not already verify
+            if not verify_password(effective_password, user.hashed_password):
+                user.hashed_password = hash_password(effective_password)
+                changed = True
+
+            if user_data.get("wallet_address") and user.wallet_address != user_data["wallet_address"]:
+                user.wallet_address = user_data["wallet_address"]
+                changed = True
+
+            if user.role != user_data["role"]:
+                user.role = user_data["role"]
+                changed = True
+
+            if user.email != user_data["email"]:
+                user.email = user_data["email"]
+                changed = True
+
+            if user_data.get("full_name") and user.full_name != user_data["full_name"]:
+                user.full_name = user_data["full_name"]
+                changed = True
+
+            if changed:
+                results["updated"].append(username)
+            else:
+                results["verified"].append(username)
+
+    session.commit()
+    logger.info(
+        "Designated demo accounts sync complete: created=%d, updated=%d, verified=%d",
+        len(results["created"]),
+        len(results["updated"]),
+        len(results["verified"]),
+    )
+    return results
+
+
+def seed_users(target_engine=None, target_sessionmaker=None, sync_passwords: bool = False):
     """Seeds default demo accounts and benchmark crops for viva & evaluation."""
     demo_password = os.getenv("DEMO_PASSWORD", "Demo12345!")
     active_engine = target_engine or engine
     active_sm = target_sessionmaker or SessionLocal
 
     try:
-        # Ensure tables exist
-        Base.metadata.create_all(bind=active_engine, checkfirst=True)
-    except Exception as exc:
-        print(f"[*] Notice on table creation check: {exc}")
-
-    try:
         session = active_sm()
-        created_count = 0
-        existing_count = 0
+        if sync_passwords:
+            sync_designated_demo_users(session, demo_password=demo_password)
+        else:
+            created_count = 0
+            existing_count = 0
+            for user_data in DEFAULT_DEMO_USERS:
+                existing = session.scalars(
+                    select(User).where(User.username == user_data["username"])
+                ).first()
 
-        # Seed Users
-        for user_data in DEFAULT_DEMO_USERS:
-            existing = session.scalars(
-                select(User).where(User.username == user_data["username"])
-            ).first()
-
-            if not existing:
-                new_user = User(
-                    username=user_data["username"],
-                    email=user_data["email"],
-                    hashed_password=hash_password(demo_password),
-                    role=user_data["role"],
-                    full_name=user_data["full_name"],
-                    wallet_address=user_data["wallet_address"],
-                )
-                session.add(new_user)
-                created_count += 1
-                print(f"[+] Created demo user: {user_data['username']} (Role: {user_data['role']})")
-            else:
-                existing_count += 1
-                if user_data.get("wallet_address") and existing.wallet_address != user_data["wallet_address"]:
-                    old_wallet = existing.wallet_address
-                    existing.wallet_address = user_data["wallet_address"]
-                    print(f"[*] Synchronized wallet for demo user {user_data['username']}: {old_wallet} -> {existing.wallet_address}")
+                if not existing:
+                    new_user = User(
+                        username=user_data["username"],
+                        email=user_data["email"],
+                        hashed_password=hash_password(demo_password),
+                        role=user_data["role"],
+                        full_name=user_data["full_name"],
+                        wallet_address=user_data["wallet_address"],
+                    )
+                    session.add(new_user)
+                    created_count += 1
                 else:
-                    print(f"[-] Existing demo user: {user_data['username']} (Role: {existing.role})")
+                    existing_count += 1
+                    if user_data.get("wallet_address") and existing.wallet_address != user_data["wallet_address"]:
+                        existing.wallet_address = user_data["wallet_address"]
 
-        # Seed Crops if empty
-        crop_count = session.query(Crop).count()
-        crops_seeded = 0
-        if crop_count == 0:
-            for crop_data in DEFAULT_DEMO_CROPS:
-                crop = Crop(**crop_data)
-                session.add(crop)
-                crops_seeded += 1
-            print(f"[+] Seeded {crops_seeded} default demo crops into registry.")
+            # Seed Crops if empty
+            crop_count = session.query(Crop).count()
+            crops_seeded = 0
+            if crop_count == 0:
+                for crop_data in DEFAULT_DEMO_CROPS:
+                    crop = Crop(**crop_data)
+                    session.add(crop)
+                    crops_seeded += 1
 
-        session.commit()
+            session.commit()
         session.close()
-        print(f"\nSeeding complete: {created_count} users created, {existing_count} verified, {crops_seeded} crops added.")
     except Exception as exc:
-        print(f"[!] User seeding skipped or failed: {exc}")
+        logger.warning("User seeding skipped or notice: %s", exc)
 
 
 if __name__ == "__main__":

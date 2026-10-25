@@ -1,7 +1,10 @@
+import logging
+import os
 from fastapi import APIRouter, Depends, HTTPException, Header, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.config import get_settings
 from app.db import get_db
 from app.models.user import User
 from app.schemas.user import TokenResponse, UserCreate, UserLogin, UserRead
@@ -12,7 +15,26 @@ from app.services.auth_service import (
     verify_password,
 )
 
+logger = logging.getLogger("app.auth")
 router = APIRouter(prefix="/api/auth", tags=["Authentication & Access Control"])
+
+_demo_sync_completed = False
+
+
+def check_and_sync_demo_accounts(db: Session) -> None:
+    """Performs controlled one-time synchronization of designated demo accounts if enabled."""
+    global _demo_sync_completed
+    if _demo_sync_completed:
+        return
+
+    if os.getenv("SYNC_DEMO_ACCOUNTS", "").strip().lower() in ("true", "1", "yes"):
+        try:
+            from app.seed_demo_users import sync_designated_demo_users
+            sync_res = sync_designated_demo_users(db)
+            _demo_sync_completed = True
+            logger.info("One-time demo account synchronization complete: %s", sync_res)
+        except Exception as exc:
+            logger.warning("One-time demo account synchronization notice: %s", exc)
 
 
 def get_current_user(
@@ -65,9 +87,19 @@ def register(payload: UserCreate, db: Session = Depends(get_db)) -> TokenRespons
 
 @router.post("/login", response_model=TokenResponse)
 def login(payload: UserLogin, db: Session = Depends(get_db)) -> TokenResponse:
+    check_and_sync_demo_accounts(db)
+
     username = payload.username.strip()
     user = db.scalars(select(User).where(User.username == username)).first()
-    if not user or not verify_password(payload.password, user.hashed_password):
+    if not user:
+        logger.warning("Login authentication failed: user '%s' does not exist in database.", username)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password.",
+        )
+
+    if not verify_password(payload.password, user.hashed_password):
+        logger.warning("Login authentication failed: password mismatch for user '%s'.", username)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password.",
@@ -75,6 +107,60 @@ def login(payload: UserLogin, db: Session = Depends(get_db)) -> TokenResponse:
 
     token = create_access_token({"sub": user.username, "role": user.role, "id": user.id})
     return TokenResponse(access_token=token, user=UserRead.model_validate(user))
+
+
+@router.post("/sync-demo-accounts")
+def sync_demo_accounts_endpoint(
+    authorization: str | None = Header(default=None),
+    x_sync_token: str | None = Header(default=None),
+    db: Session = Depends(get_db),
+) -> dict:
+    """
+    Explicit, controlled synchronization of the five designated demo accounts.
+    Strictly authenticated: requires X-Sync-Token matching SYNC_DEMO_TOKEN or JWT_SECRET,
+    or a valid ADMIN Bearer JWT token.
+    Never exposes passwords, salts, hashes, or database credentials.
+    Updates only designated demo accounts without touching any other users.
+    """
+    current_settings = get_settings()
+    token = x_sync_token
+    if not token and authorization and authorization.startswith("Bearer "):
+        token = authorization.split(" ")[1]
+
+    authorized = False
+    configured_sync_token = os.getenv("SYNC_DEMO_TOKEN", "").strip()
+    effective_secret = configured_sync_token or current_settings.jwt_secret
+
+    if token and effective_secret and token == effective_secret:
+        authorized = True
+    elif token:
+        try:
+            payload = decode_access_token(token)
+            if payload.get("role") == "ADMIN":
+                authorized = True
+        except Exception:
+            pass
+
+    if not authorized:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Unauthorized. A valid synchronization token or admin authorization is required.",
+        )
+
+    from app.seed_demo_users import sync_designated_demo_users
+    result = sync_designated_demo_users(db)
+    return {
+        "status": "success",
+        "message": "Designated demo accounts synchronized successfully.",
+        "synchronized": {
+            "created_count": len(result["created"]),
+            "updated_count": len(result["updated"]),
+            "verified_count": len(result["verified"]),
+            "created": result["created"],
+            "updated": result["updated"],
+            "verified": result["verified"],
+        },
+    }
 
 
 @router.get("/me", response_model=UserRead)
