@@ -4,7 +4,7 @@
 $PidFile = "$PSScriptRoot\.viva-pids.json"
 
 Write-Host "==========================================================" -ForegroundColor Cyan
-Write-Host " Farm Traceability System — Stopping Local Viva Suite" -ForegroundColor Cyan
+Write-Host " Farm Traceability System - Stopping Local Viva Suite" -ForegroundColor Cyan
 Write-Host "==========================================================" -ForegroundColor Cyan
 
 if (-not (Test-Path $PidFile)) {

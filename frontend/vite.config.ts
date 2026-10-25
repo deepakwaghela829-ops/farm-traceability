@@ -1,9 +1,7 @@
 import { defineConfig } from 'vite'
-import vue from '@vitejs/plugin-vue'
 import { fileURLToPath } from 'node:url'
 
 export default defineConfig({
-  plugins: [vue()],
   server: {
     proxy: {
       '/api': {
@@ -24,9 +22,6 @@ export default defineConfig({
         manualChunks(id) {
           if (id.includes('node_modules/ethers')) {
             return 'vendor-ethers'
-          }
-          if (id.includes('node_modules/vue')) {
-            return 'vendor-vue'
           }
           if (id.includes('node_modules/qrcode')) {
             return 'vendor-qrcode'

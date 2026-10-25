@@ -3,11 +3,69 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#0f172a" />
-    <title>Farmer Crop Entry</title>
+    <meta name="theme-color" content="#0b0f19" />
+    <title>AgriTrace OS — Farm-to-Consumer Traceability</title>
+    <link rel="stylesheet" href="/css/style.css" />
   </head>
   <body>
-    <div id="app"></div>
-    <script type="module" src="/src/main.ts"></script>
+    <!-- Top Navigation Header -->
+    <header id="app-header">
+      <div class="header-inner">
+        <div class="brand-wrapper">
+          <button id="sidebar-toggle-btn" class="mobile-toggle" aria-label="Toggle navigation menu">
+            ☰
+          </button>
+          <a href="#/consumer" class="brand">
+            <div class="brand-icon-box">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10Z"/><path d="M2 21c0-3 1.85-5.36 5.08-6C9.5 14.52 12 13 13 12"/></svg>
+            </div>
+            <div class="brand-title">
+              AgriTrace <span class="brand-os">OS</span>
+            </div>
+          </a>
+          <span class="brand-tagline">Farm-to-Consumer Traceability</span>
+        </div>
+
+        <div id="header-user-status" class="header-user">
+          <!-- Dynamically populated by app.js -->
+        </div>
+      </div>
+    </header>
+
+    <!-- Global Toast Notifications -->
+    <div id="toast-container" class="toast-container"></div>
+
+    <!-- Application Shell (Sidebar + Main Content) -->
+    <div id="app-body">
+      <!-- Role Navigation Sidebar -->
+      <aside id="app-sidebar">
+        <!-- Dynamically populated by app.js based on role and active route -->
+      </aside>
+
+      <!-- Main Content View Area -->
+      <main id="app-content">
+        <div id="view-login" style="display: none;"></div>
+        <div id="view-farmer" style="display: none;"></div>
+        <div id="view-supplier" style="display: none;"></div>
+        <div id="view-retailer" style="display: none;"></div>
+        <div id="view-consumer" style="display: none;"></div>
+        <div id="view-admin" style="display: none;"></div>
+      </main>
+    </div>
+
+    <!-- Global Footer -->
+    <footer id="app-footer">
+      <div class="footer-inner">
+        <div>
+          <strong>AgriTrace OS</strong> — Transparent Agricultural Supply Chain & Provenance Platform
+        </div>
+        <div>
+          FastAPI &bull; PostgreSQL &bull; Ganache EVM &bull; Random Forest ML
+        </div>
+      </div>
+    </footer>
+
+    <!-- App Entrypoint Script -->
+    <script type="module" src="/js/app.js"></script>
   </body>
 </html>

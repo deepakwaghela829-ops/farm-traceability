@@ -1,5 +1,5 @@
 # start-viva.ps1
-# Automates starting the local viva environment.
+# Automates starting and verifying the local viva environment.
 
 $ErrorActionPreference = "Stop"
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
@@ -10,136 +10,216 @@ Write-Host "==========================================================" -Foregro
 Write-Host " Farm Traceability System - Starting Local Viva Suite" -ForegroundColor Cyan
 Write-Host "==========================================================" -ForegroundColor Cyan
 
-# 1. Check Ganache Connection
-Write-Host "`n[1/4] Verifying Ganache RPC at http://127.0.0.1:7545..." -ForegroundColor Yellow
-$rpcOnline = $false
+# 1. Ganache Check & Start
+Write-Host "`n[1/5] Checking Ganache Testnet..." -ForegroundColor Yellow
+$ganachePass = $false
 
-try {
-    $res = Invoke-RestMethod `
-        -Uri "http://127.0.0.1:7545" `
-        -Method Post `
-        -ContentType "application/json" `
-        -Body '{"jsonrpc":"2.0","method":"net_version","params":[],"id":1}' `
-        -TimeoutSec 3 `
-        -ErrorAction SilentlyContinue
-
-    if ($res -and $res.result) {
-        $rpcOnline = $true
-        Write-Host "  [OK] Ganache RPC is active (Network ID: $($res.result))" -ForegroundColor Green
-    }
-}
-catch {
-    $rpcOnline = $false
-}
-
-if (-not $rpcOnline) {
-    Write-Host "  Ganache is not detected on port 7545. Attempting to start Ganache CLI..." -ForegroundColor Yellow
-
+for ($attempt = 1; $attempt -le 2; $attempt++) {
     try {
-        $ganacheProc = Start-Process `
-            -FilePath "npx.cmd" `
-            -ArgumentList "ganache", "--server.port", "7545", "--chain.chainId", "1337" `
-            -PassThru `
-            -WindowStyle Hidden
+        $res = Invoke-RestMethod `
+            -Uri "http://127.0.0.1:7545" `
+            -Method Post `
+            -ContentType "application/json" `
+            -Body '{"jsonrpc":"2.0","method":"net_version","params":[],"id":1}' `
+            -TimeoutSec 3 `
+            -ErrorAction SilentlyContinue
 
-        $SpawnedPids += $ganacheProc.Id
-        Start-Sleep -Seconds 5
-
-        Write-Host "  [OK] Started Ganache background process (PID: $($ganacheProc.Id))" -ForegroundColor Green
+        if ($res -and $res.result) {
+            $ganachePass = $true
+            Write-Host "  Ganache PASS (Chain ID: $($res.result) at 127.0.0.1:7545)" -ForegroundColor Green
+            break
+        }
     }
     catch {
-        Write-Warning "Could not start Ganache CLI automatically. Please ensure Ganache GUI or CLI is running at http://127.0.0.1:7545."
+        $ganachePass = $false
+    }
+
+    if (-not $ganachePass -and $attempt -eq 1) {
+        Write-Host "  Starting local Ganache process..." -ForegroundColor Gray
+        try {
+            $ganacheProc = Start-Process `
+                -FilePath "npx.cmd" `
+                -ArgumentList "ganache", "--server.port", "7545", "--chain.chainId", "1337" `
+                -PassThru `
+                -WindowStyle Hidden
+            $SpawnedPids += $ganacheProc.Id
+            Start-Sleep -Seconds 4
+        }
+        catch {
+            Write-Warning "Could not start Ganache automatically: $_"
+        }
     }
 }
 
-# 2. Deploy CropRegistry Smart Contract
-Write-Host "`n[2/4] Deploying CropRegistry smart contract to fresh chain..." -ForegroundColor Yellow
+if (-not $ganachePass) {
+    Write-Host "  Ganache FAIL - Unable to connect to http://127.0.0.1:7545" -ForegroundColor Red
+    exit 1
+}
+
+# 2. Deploy & Verify Smart Contract
+Write-Host "`n[2/5] Deploying CropRegistry Smart Contract..." -ForegroundColor Yellow
+$contractPass = $false
 
 Push-Location "$ProjectRoot\blockchain"
-
 try {
     & npx hardhat run scripts/deploy.js --network ganache
-
-    if ($LASTEXITCODE -ne 0) {
-        throw "Hardhat deployment returned exit code $LASTEXITCODE"
+    if ($LASTEXITCODE -eq 0) {
+        $contractPass = $true
+        Write-Host "  Contract PASS (CropRegistry deployed and synchronized)" -ForegroundColor Green
+    } else {
+        Write-Host "  Contract FAIL (Hardhat deployment failed with exit code $LASTEXITCODE)" -ForegroundColor Red
     }
-
-    Write-Host "  [OK] Smart contract deployed and metadata synchronized!" -ForegroundColor Green
 }
 catch {
-    Write-Warning "Smart contract deployment had warnings or errors. Check Ganache status."
-    Write-Warning $_
+    Write-Host "  Contract FAIL ($_)" -ForegroundColor Red
 }
 finally {
     Pop-Location
 }
 
-# 3. Seed Demo Users in Backend
-Write-Host "`n[3/4] Ensuring demo accounts are seeded..." -ForegroundColor Yellow
+if (-not $contractPass) {
+    exit 1
+}
+
+# 3. Database Check & Demo User Seeding
+Write-Host "`n[3/5] Verifying Database & Seeding Demo Accounts..." -ForegroundColor Yellow
+$dbPass = $false
 
 $pythonExe = "$ProjectRoot\backend\.venv\Scripts\python.exe"
-
 if (-not (Test-Path $pythonExe)) {
     $pythonExe = "python"
 }
 
 Push-Location "$ProjectRoot\backend"
-
 try {
     & $pythonExe "app/seed_demo_users.py"
-
-    if ($LASTEXITCODE -ne 0) {
-        Write-Warning "Demo user seeding returned exit code $LASTEXITCODE"
+    if ($LASTEXITCODE -eq 0) {
+        $dbPass = $true
+        Write-Host "  Database PASS (Relational schema verified, demo accounts active)" -ForegroundColor Green
+    } else {
+        Write-Host "  Database FAIL (User seeding returned exit code $LASTEXITCODE)" -ForegroundColor Red
     }
 }
 catch {
-    Write-Warning "User seeding completed with notices: $_"
+    Write-Host "  Database FAIL ($_)" -ForegroundColor Red
 }
 finally {
     Pop-Location
 }
 
-# 4. Start Backend & Frontend Services
-Write-Host "`n[4/4] Starting FastAPI backend and Vue frontend..." -ForegroundColor Yellow
+if (-not $dbPass) {
+    exit 1
+}
 
-# Start FastAPI
-$backendProc = Start-Process `
-    -FilePath $pythonExe `
-    -ArgumentList "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "8000", "--reload" `
-    -WorkingDirectory "$ProjectRoot\backend" `
-    -PassThru `
-    -WindowStyle Hidden
+# 4. Start & Verify Backend Service
+Write-Host "`n[4/5] Starting FastAPI Backend..." -ForegroundColor Yellow
+$backendPass = $false
 
-$SpawnedPids += $backendProc.Id
+# Check if backend is already listening
+try {
+    $health = Invoke-RestMethod -Uri "http://127.0.0.1:8000/health" -Method Get -TimeoutSec 2 -ErrorAction SilentlyContinue
+    if ($health -and $health.status -eq "ok") {
+        $backendPass = $true
+    }
+} catch {}
 
-Write-Host "  [OK] FastAPI backend started (PID: $($backendProc.Id)) -> http://127.0.0.1:8000" -ForegroundColor Green
+if (-not $backendPass) {
+    $backendProc = Start-Process `
+        -FilePath $pythonExe `
+        -ArgumentList "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "8000" `
+        -WorkingDirectory "$ProjectRoot\backend" `
+        -PassThru `
+        -WindowStyle Hidden
 
-# Start Vite Frontend
-$frontendProc = Start-Process `
-    -FilePath "npm.cmd" `
-    -ArgumentList "run", "dev" `
-    -WorkingDirectory "$ProjectRoot\frontend" `
-    -PassThru `
-    -WindowStyle Hidden
+    $SpawnedPids += $backendProc.Id
 
-$SpawnedPids += $frontendProc.Id
+    for ($i = 1; $i -le 10; $i++) {
+        Start-Sleep -Seconds 1
+        try {
+            $health = Invoke-RestMethod -Uri "http://127.0.0.1:8000/health" -Method Get -TimeoutSec 2 -ErrorAction SilentlyContinue
+            if ($health -and $health.status -eq "ok") {
+                $backendPass = $true
+                break
+            }
+        } catch {}
+    }
+}
 
-Write-Host "  [OK] Vite dev server started (PID: $($frontendProc.Id)) -> http://localhost:5173" -ForegroundColor Green
+if ($backendPass) {
+    Write-Host "  Backend PASS (FastAPI listening at http://127.0.0.1:8000)" -ForegroundColor Green
+} else {
+    Write-Host "  Backend FAIL - FastAPI backend did not respond at http://127.0.0.1:8000/health" -ForegroundColor Red
+    exit 1
+}
 
-# Save PIDs
-$SpawnedPids | ConvertTo-Json | Out-File -FilePath $PidFile -Encoding utf8
+# 5. Start & Verify Frontend Service
+Write-Host "`n[5/5] Starting Frontend (HTML/CSS/JavaScript)..." -ForegroundColor Yellow
+$frontendPass = $false
 
-Write-Host "`n==========================================================" -ForegroundColor Cyan
-Write-Host " [VIVA ENVIRONMENT READY]" -ForegroundColor Green
-Write-Host "==========================================================" -ForegroundColor Cyan
-Write-Host " Frontend Portal : http://localhost:5173" -ForegroundColor White
-Write-Host " Backend API Docs: http://127.0.0.1:8000/docs" -ForegroundColor White
-Write-Host " Ganache Testnet : http://127.0.0.1:7545 (Chain ID 1337)" -ForegroundColor White
-Write-Host "`n Demo Accounts (Password: Demo12345!):" -ForegroundColor Cyan
-Write-Host "  - Farmer   : farmer1" -ForegroundColor Gray
-Write-Host "  - Supplier : supplier1" -ForegroundColor Gray
-Write-Host "  - Retailer : retailer1" -ForegroundColor Gray
-Write-Host "  - Consumer : consumer1 (or open public portal)" -ForegroundColor Gray
-Write-Host "  - Admin    : admin1" -ForegroundColor Gray
-Write-Host "`n To stop services safely, run: scripts\stop-viva.ps1" -ForegroundColor Yellow
-Write-Host "==========================================================" -ForegroundColor Cyan
+# Check if frontend is already listening
+try {
+    $fe = Invoke-WebRequest -Uri "http://localhost:5173" -UseBasicParsing -TimeoutSec 2 -ErrorAction SilentlyContinue
+    if ($fe -and $fe.StatusCode -eq 200) {
+        $frontendPass = $true
+    }
+} catch {}
+
+if (-not $frontendPass) {
+    $frontendProc = Start-Process `
+        -FilePath "npm.cmd" `
+        -ArgumentList "run", "dev" `
+        -WorkingDirectory "$ProjectRoot\frontend" `
+        -PassThru `
+        -WindowStyle Hidden
+
+    $SpawnedPids += $frontendProc.Id
+
+    for ($i = 1; $i -le 10; $i++) {
+        Start-Sleep -Seconds 1
+        try {
+            $fe = Invoke-WebRequest -Uri "http://localhost:5173" -UseBasicParsing -TimeoutSec 2 -ErrorAction SilentlyContinue
+            if ($fe -and $fe.StatusCode -eq 200) {
+                $frontendPass = $true
+                break
+            }
+        } catch {}
+    }
+}
+
+if ($frontendPass) {
+    Write-Host "  Frontend PASS (Vite dev server running at http://localhost:5173)" -ForegroundColor Green
+} else {
+    Write-Host "  Frontend FAIL - Vite dev server did not respond at http://localhost:5173" -ForegroundColor Red
+    exit 1
+}
+
+# Save PIDs if any were spawned
+if ($SpawnedPids.Count -gt 0) {
+    $existingPids = @()
+    if (Test-Path $PidFile) {
+        try { $existingPids = Get-Content $PidFile | ConvertFrom-Json } catch {}
+    }
+    $allPids = @($existingPids) + @($SpawnedPids) | Select-Object -Unique
+    $allPids | ConvertTo-Json | Out-File -FilePath $PidFile -Encoding utf8
+}
+
+# Final Verification Summary
+if ($ganachePass -and $contractPass -and $dbPass -and $backendPass -and $frontendPass) {
+    Write-Host "`n==========================================================" -ForegroundColor Cyan
+    Write-Host " [VIVA ENVIRONMENT READY]" -ForegroundColor Green
+    Write-Host "==========================================================" -ForegroundColor Cyan
+    Write-Host " Frontend Portal : http://localhost:5173" -ForegroundColor White
+    Write-Host " Backend API Docs: http://127.0.0.1:8000/docs" -ForegroundColor White
+    Write-Host " Ganache Testnet : http://127.0.0.1:7545 (Chain ID 1337)" -ForegroundColor White
+    Write-Host "`n Demo Accounts (Password: Demo12345!):" -ForegroundColor Cyan
+    Write-Host "  - Farmer   : farmer1" -ForegroundColor Gray
+    Write-Host "  - Supplier : supplier1" -ForegroundColor Gray
+    Write-Host "  - Retailer : retailer1" -ForegroundColor Gray
+    Write-Host "  - Consumer : consumer1 (or open public portal)" -ForegroundColor Gray
+    Write-Host "  - Admin    : admin1" -ForegroundColor Gray
+    Write-Host "`n To stop services safely, run: scripts\stop-viva.ps1" -ForegroundColor Yellow
+    Write-Host "==========================================================" -ForegroundColor Cyan
+} else {
+    Write-Host "`n[ERROR] Environment could not be fully initialized." -ForegroundColor Red
+    exit 1
+}
