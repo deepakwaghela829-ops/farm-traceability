@@ -26,19 +26,21 @@ def verify_password(plain_password: str, stored_hash: str) -> bool:
 
 
 def create_access_token(data: dict[str, Any], expires_delta: timedelta | None = None) -> str:
+    current_settings = get_settings()
     to_encode = data.copy()
     if expires_delta:
         expire = datetime.now(timezone.utc) + expires_delta
     else:
-        expire = datetime.now(timezone.utc) + timedelta(minutes=settings.jwt_expire_minutes)
+        expire = datetime.now(timezone.utc) + timedelta(minutes=current_settings.jwt_expire_minutes)
     to_encode.update({"exp": expire})
-    encoded_jwt = jwt.encode(to_encode, settings.jwt_secret, algorithm=settings.jwt_algorithm)
+    encoded_jwt = jwt.encode(to_encode, current_settings.jwt_secret, algorithm=current_settings.jwt_algorithm)
     return encoded_jwt
 
 
 def decode_access_token(token: str) -> dict[str, Any]:
+    current_settings = get_settings()
     try:
-        payload = jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
+        payload = jwt.decode(token, current_settings.jwt_secret, algorithms=[current_settings.jwt_algorithm])
         return payload
     except jwt.PyJWTError as err:
         raise ValueError(f"Invalid token: {err}") from err

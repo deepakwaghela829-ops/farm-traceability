@@ -1,27 +1,57 @@
 // deploy-remote.js - Deploys CropRegistry contract to Remote Ganache EVM Node
 const fs = require('fs');
 const path = require('path');
+const readline = require('readline');
 const { ethers } = require('ethers');
 
-// Load environment variables
+// Load environment variables safely
 require('dotenv').config();
 
-const REMOTE_URL = process.env.GANACHE_REMOTE_URL || process.argv[2];
-const RPC_TOKEN = process.env.GANACHE_RPC_TOKEN || process.argv[3] || '';
-const DEPLOYER_PRIVATE_KEY = process.env.DEPLOYER_PRIVATE_KEY || process.argv[4];
-const MNEMONIC = process.env.GANACHE_MNEMONIC || process.argv[5];
+function askQuestion(query) {
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+  return new Promise((resolve) =>
+    rl.question(query, (ans) => {
+      rl.close();
+      resolve(ans.trim());
+    })
+  );
+}
 
 async function main() {
-  if (!REMOTE_URL) {
-    console.error('Usage: node deploy-remote.js <GANACHE_REMOTE_URL> [GANACHE_RPC_TOKEN] [DEPLOYER_PRIVATE_KEY_OR_MNEMONIC]');
-    console.error('Example: node deploy-remote.js https://ganache.example.com my-secret-token 0xabcdef...');
-    process.exit(1);
-  }
+  let remoteUrl = process.env.GANACHE_REMOTE_URL || process.env.GANACHE_RPC_URL || process.argv[2];
+  let rpcToken = process.env.GANACHE_RPC_TOKEN || '';
+  let deployerPrivateKey = process.env.DEPLOYER_PRIVATE_KEY || '';
 
   console.log('==================================================================');
   console.log(' AgriTrace OS - Deploying CropRegistry to Remote Ganache EVM');
   console.log('==================================================================');
-  console.log(`Connecting to: ${REMOTE_URL}`);
+
+  if (!remoteUrl) {
+    remoteUrl = await askQuestion('Enter Remote Ganache URL (e.g. https://ganache.yourdomain.com): ');
+  }
+
+  if (!remoteUrl) {
+    console.error('[ERROR] Remote Ganache URL is required.');
+    process.exit(1);
+  }
+
+  if (!rpcToken && process.env.GANACHE_RPC_TOKEN === undefined) {
+    rpcToken = await askQuestion('Enter RPC Bearer Token (press Enter if none): ');
+  }
+
+  if (!deployerPrivateKey && process.env.DEPLOYER_PRIVATE_KEY === undefined) {
+    deployerPrivateKey = await askQuestion('Enter Deployer Private Key: ');
+  }
+
+  console.log(`\nConnecting to: ${remoteUrl}`);
+  if (rpcToken) {
+    console.log(`Authentication : Bearer token provided (${rpcToken.length} chars)`);
+  } else {
+    console.log(`Authentication : None`);
+  }
 
   // 1. Setup Custom Fetch with Authorization Header
   const customFetch = (url, reqOptions = {}) => {
@@ -29,13 +59,13 @@ async function main() {
       ...(reqOptions.headers || {}),
       'Content-Type': 'application/json',
     };
-    if (RPC_TOKEN) {
-      headers['Authorization'] = `Bearer ${RPC_TOKEN.trim()}`;
+    if (rpcToken) {
+      headers['Authorization'] = `Bearer ${rpcToken.trim()}`;
     }
     return fetch(url, { ...reqOptions, headers });
   };
 
-  const provider = new ethers.JsonRpcProvider(REMOTE_URL, undefined, {
+  const provider = new ethers.JsonRpcProvider(remoteUrl, undefined, {
     staticNetwork: true,
     fetch: customFetch,
   });
@@ -45,16 +75,12 @@ async function main() {
 
   // 2. Resolve Deployer Signer
   let wallet;
-  if (DEPLOYER_PRIVATE_KEY && DEPLOYER_PRIVATE_KEY.startsWith('0x')) {
-    wallet = new ethers.Wallet(DEPLOYER_PRIVATE_KEY, provider);
-  } else if (DEPLOYER_PRIVATE_KEY && DEPLOYER_PRIVATE_KEY.split(' ').length >= 12) {
-    const hd = ethers.HDNodeWallet.fromPhrase(DEPLOYER_PRIVATE_KEY);
-    wallet = new ethers.Wallet(hd.privateKey, provider);
-  } else if (MNEMONIC) {
-    const hd = ethers.HDNodeWallet.fromPhrase(MNEMONIC);
+  if (deployerPrivateKey && deployerPrivateKey.startsWith('0x')) {
+    wallet = new ethers.Wallet(deployerPrivateKey, provider);
+  } else if (deployerPrivateKey && deployerPrivateKey.split(' ').length >= 12) {
+    const hd = ethers.HDNodeWallet.fromPhrase(deployerPrivateKey);
     wallet = new ethers.Wallet(hd.privateKey, provider);
   } else {
-    // If running against an open Ganache RPC with unlocked accounts
     try {
       const accounts = await provider.listAccounts();
       if (accounts && accounts.length > 0) {
@@ -65,7 +91,7 @@ async function main() {
       }
     } catch {
       throw new Error(
-        'Deployer credentials required. Pass DEPLOYER_PRIVATE_KEY or GANACHE_MNEMONIC as argument or environment variable.'
+        'Deployer credentials required. Set DEPLOYER_PRIVATE_KEY environment variable or enter it when prompted.'
       );
     }
   }
@@ -96,10 +122,14 @@ async function main() {
   const address = await contract.getAddress();
   const receipt = await deployTx.wait();
 
-  console.log('\n[SUCCESS] Contract Successfully Deployed On-Chain!');
+  console.log('\n==================================================================');
+  console.log(' [SUCCESS] CropRegistry Successfully Deployed to Remote Ganache!');
+  console.log('==================================================================');
   console.log(`Contract Address : ${address}`);
-  console.log(`Mined in Block   : ${receipt.blockNumber}`);
+  console.log(`Chain ID         : ${network.chainId}`);
+  console.log(`Block Number     : ${receipt.blockNumber}`);
   console.log(`Gas Used         : ${receipt.gasUsed.toString()}`);
+  console.log('==================================================================');
 
   // 4. Update Deployment Metadata
   const info = {
@@ -107,7 +137,7 @@ async function main() {
     contractAddress: address,
     network: 'remote-ganache',
     chainId: Number(network.chainId),
-    rpcUrl: REMOTE_URL,
+    rpcUrl: remoteUrl,
     deployer: wallet.address,
     deploymentTxHash: deployTx.hash,
     blockNumber: receipt.blockNumber,
@@ -128,17 +158,11 @@ async function main() {
     console.log('Synchronized deployment info to frontend/blockchain/');
   }
 
-  console.log('\n==================================================================');
-  console.log(' Action Required on Vercel Backend:');
-  console.log(` Set GANACHE_CONTRACT_ADDRESS=${address}`);
-  console.log(` Set GANACHE_RPC_URL=${REMOTE_URL}`);
-  if (RPC_TOKEN) {
-    console.log(` Set GANACHE_RPC_TOKEN=${RPC_TOKEN}`);
-  }
-  console.log('==================================================================');
+  console.log('\nNext Step: Set this in your Vercel Backend:');
+  console.log(`vercel env add GANACHE_CONTRACT_ADDRESS production --value "${address}"`);
 }
 
 main().catch((err) => {
-  console.error('[DEPLOYMENT FAILED]:', err);
+  console.error('\n[FATAL ERROR]', err.message || err);
   process.exit(1);
 });

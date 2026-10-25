@@ -3,6 +3,7 @@ import { ethers } from 'ethers';
 import abi from '../blockchain/CropRegistry.abi.json';
 import deploymentInfo from '../blockchain/deployment-info.json';
 import { API_BASE_URL } from './api.js';
+import { getToken } from './auth.js';
 
 export const LOCAL_GANACHE_RPC = 'http://127.0.0.1:7545';
 export const GANACHE_RPC =
@@ -25,7 +26,22 @@ export function updateContractAddress(newAddress) {
 
 export function getProvider() {
   if (!cachedProvider) {
-    cachedProvider = new ethers.JsonRpcProvider(GANACHE_RPC);
+    const customFetch = (url, options = {}) => {
+      const token = getToken();
+      const headers = {
+        ...(options.headers || {}),
+        'Content-Type': 'application/json',
+      };
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+      return fetch(url, { ...options, headers });
+    };
+
+    cachedProvider = new ethers.JsonRpcProvider(GANACHE_RPC, undefined, {
+      staticNetwork: true,
+      fetch: customFetch,
+    });
   }
   return cachedProvider;
 }
@@ -73,13 +89,19 @@ export async function quickCheckGanache() {
       }
     }
 
-    // 2. Direct / Local check
+    // 2. Direct / Local check with auth header
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 2000);
 
+    const token = getToken();
+    const headers = { 'Content-Type': 'application/json' };
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
     const res = await fetch(GANACHE_RPC, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify({
         jsonrpc: '2.0',
         method: 'eth_accounts',

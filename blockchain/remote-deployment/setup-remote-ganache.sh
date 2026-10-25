@@ -20,10 +20,7 @@ GANACHE_USER="ganache"
 CONFIG_DIR="/etc/ganache"
 ENV_FILE="${CONFIG_DIR}/ganache.env"
 
-# Flags
-DOMAIN=""
-CUSTOM_TOKEN=""
-CUSTOM_MNEMONIC=""
+DOMAIN="${GANACHE_DOMAIN:-}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -31,19 +28,8 @@ while [[ $# -gt 0 ]]; do
       DOMAIN="$2"
       shift 2
       ;;
-    --token)
-      CUSTOM_TOKEN="$2"
-      shift 2
-      ;;
-    --mnemonic)
-      CUSTOM_MNEMONIC="$2"
-      shift 2
-      ;;
     *)
-      # Positional fallback: $1 = token, $2 = domain
-      if [ -z "${CUSTOM_TOKEN}" ]; then
-        CUSTOM_TOKEN="$1"
-      elif [ -z "${DOMAIN}" ]; then
+      if [ -z "${DOMAIN}" ]; then
         DOMAIN="$1"
       fi
       shift
@@ -51,19 +37,56 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-TOKEN="${CUSTOM_TOKEN:-$(openssl rand -hex 24)}"
+# Enforce FQDN requirement (No raw IPs or empty domain allowed for production HTTPS)
+if [ -z "${DOMAIN}" ]; then
+    echo "[ERROR] A fully-qualified domain name (FQDN) is strictly required for production deployment (e.g. --domain ganache.yourdomain.com)."
+    echo "        Plain HTTP access is blocked for security. Please provide a domain name with working DNS."
+    exit 1
+fi
 
-echo "[*] Assigned Chain ID: ${CHAIN_ID}"
-echo "[*] Pinned Ganache CLI Version: ${GANACHE_VERSION}"
-echo "[*] Local Bind Port: 127.0.0.1:${RPC_LOCAL_PORT}"
+if [[ "${DOMAIN}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo "[ERROR] '${DOMAIN}' is an IP address. Public Certificate Authorities (Let's Encrypt) require a valid domain name."
+    echo "        Please point an A record (e.g. ganache.yourdomain.com) to this VPS IP before running setup."
+    exit 1
+fi
+
+echo "[*] Target Production Domain: ${DOMAIN}"
+echo "[*] Assigned Chain ID       : ${CHAIN_ID}"
+echo "[*] Pinned Ganache Version  : ${GANACHE_VERSION}"
+echo "[*] Local Bind Port         : 127.0.0.1:${RPC_LOCAL_PORT}"
 
 # 2. Update System Packages & Install Dependencies
-echo -e "\n[1/7] Updating system packages..."
+echo -e "\n[1/7] Updating system packages and installing prerequisites..."
 apt-get update -y
-apt-get install -y curl ufw nginx certbot python3-certbot-nginx build-essential
+apt-get install -y curl ufw nginx certbot python3-certbot-nginx build-essential dnsutils
 
-# 3. Install Node.js 20 LTS, Ganache CLI & ethers for wallet derivation
-echo -e "\n[2/7] Installing Node.js 20 LTS, Ganache CLI v${GANACHE_VERSION} & ethers..."
+# 3. DNS Verification: Validate that Domain resolves to this server
+echo -e "\n[2/7] Verifying DNS resolution for '${DOMAIN}'..."
+VPS_IP="$(curl -s4 --max-time 5 https://api.ipify.org || curl -s4 --max-time 5 https://ifconfig.me || hostname -I | awk '{print $1}')"
+RESOLVED_IP="$(dig +short "${DOMAIN}" | tail -n 1 || true)"
+
+if [ -z "${RESOLVED_IP}" ]; then
+    RESOLVED_IP="$(getent ahosts "${DOMAIN}" | head -n 1 | awk '{print $1}' || true)"
+fi
+
+echo "  [*] Server Public IP : ${VPS_IP}"
+echo "  [*] DNS Resolved IP  : ${RESOLVED_IP:-NOT_RESOLVED}"
+
+if [ -z "${RESOLVED_IP}" ]; then
+    echo "[ERROR] DNS lookup failed for '${DOMAIN}'. The domain does not resolve to any IP address."
+    echo "        Please configure your DNS A record and wait for DNS propagation before running this script."
+    exit 1
+fi
+
+if [ "${RESOLVED_IP}" != "${VPS_IP}" ]; then
+    echo "[ERROR] DNS Mismatch: '${DOMAIN}' points to '${RESOLVED_IP}', but this server is '${VPS_IP}'."
+    echo "        Certbot TLS verification will fail. Update your DNS A record to point to '${VPS_IP}'."
+    exit 1
+fi
+echo "  [OK] DNS record successfully verified!"
+
+# 4. Install Node.js 20 LTS, Ganache CLI & ethers for local key derivation
+echo -e "\n[3/7] Installing Node.js 20 LTS, Ganache CLI v${GANACHE_VERSION} & ethers..."
 if ! command -v node >/dev/null 2>&1; then
     curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
     apt-get install -y nodejs
@@ -72,10 +95,10 @@ fi
 npm install -g "ganache@${GANACHE_VERSION}" "ethers@6"
 NODE_GLOBAL_PATH="$(npm root -g)"
 export NODE_PATH="${NODE_GLOBAL_PATH}:${NODE_PATH:-}"
-echo "  [OK] Installed $(ganache --version)"
+echo "  [OK] Installed Node $(node -v) and Ganache $(ganache --version)"
 
-# 4. Create Dedicated Non-Root System User & Persistent Directory
-echo -e "\n[3/7] Setting up dedicated non-root user and persistent disk storage..."
+# 5. Create Dedicated Non-Root System User & Persistent Directory
+echo -e "\n[4/7] Setting up dedicated non-root user and persistent disk storage..."
 if ! id "${GANACHE_USER}" >/dev/null 2>&1; then
     useradd --system --shell /usr/sbin/nologin --home-dir /var/lib/ganache "${GANACHE_USER}"
 fi
@@ -86,29 +109,19 @@ chown -R "${GANACHE_USER}:${GANACHE_USER}" /var/lib/ganache
 chmod 700 /var/lib/ganache
 chmod 700 "${DATA_DIR}"
 
-# 5. Generate or Load Unique Demo Mnemonic (Never commited to git)
-echo -e "\n[4/7] Configuring secure unique wallet configuration..."
-if [ -n "${CUSTOM_MNEMONIC}" ]; then
-    MNEMONIC="${CUSTOM_MNEMONIC}"
-elif [ -f "${ENV_FILE}" ] && grep -q "GANACHE_MNEMONIC" "${ENV_FILE}"; then
+# 6. Generate or Load Unique Demo Mnemonic (Secure Storage in restricted file)
+echo -e "\n[5/7] Configuring secure wallet credentials..."
+if [ -f "${ENV_FILE}" ] && grep -q "GANACHE_MNEMONIC" "${ENV_FILE}"; then
     echo "  [*] Existing configuration found at ${ENV_FILE}. Preserving current chain mnemonic."
     MNEMONIC="$(grep "^GANACHE_MNEMONIC=" "${ENV_FILE}" | cut -d'=' -f2- | tr -d '\"')"
+    TOKEN="$(grep "^GANACHE_RPC_TOKEN=" "${ENV_FILE}" | cut -d'=' -f2- | tr -d '\"')"
 else
-    echo "  [*] Generating unique, random 12-word demo mnemonic..."
+    echo "  [*] Generating unique 12-word demo mnemonic and random 256-bit RPC auth token..."
     MNEMONIC="$(NODE_PATH="${NODE_GLOBAL_PATH}" node -e "const { ethers } = require('ethers'); console.log(ethers.Wallet.createRandom().mnemonic.phrase);")"
+    TOKEN="$(openssl rand -hex 32)"
 fi
 
-cat <<EOF > "${ENV_FILE}"
-# AgriTrace OS - Ganache Node Secrets
-# DO NOT COMMIT OR EXPOSE THIS FILE
-GANACHE_MNEMONIC="${MNEMONIC}"
-GANACHE_RPC_TOKEN="${TOKEN}"
-EOF
-
-chown "${GANACHE_USER}:${GANACHE_USER}" "${ENV_FILE}"
-chmod 600 "${ENV_FILE}"
-
-# Derive demo role accounts
+# Derive public addresses for roles
 WALLET_INFO="$(NODE_PATH="${NODE_GLOBAL_PATH}" node -e "
 const { ethers } = require('ethers');
 const m = process.argv[1];
@@ -129,10 +142,21 @@ RETAILER_ADDR="$(echo "${WALLET_INFO}" | grep "^RETAILER_ADDR=" | cut -d'=' -f2)
 CONSUMER_ADDR="$(echo "${WALLET_INFO}" | grep "^CONSUMER_ADDR=" | cut -d'=' -f2)"
 ADMIN_ADDR="$(echo "${WALLET_INFO}" | grep "^ADMIN_ADDR=" | cut -d'=' -f2)"
 
-# 6. Create Systemd Service for Auto-Restart & Persistence
-echo -e "\n[5/7] Configuring systemd service /etc/systemd/system/ganache.service..."
-GANACHE_BIN="$(which ganache)"
+# Write restricted secrets file (DO NOT PRINT SECRETS TO LOGS)
+cat <<EOF > "${ENV_FILE}"
+# AgriTrace OS - Production Ganache EVM Node Configuration
+# RESTRICTED: chmod 600 - DO NOT COMMIT OR EXPOSE
+GANACHE_MNEMONIC="${MNEMONIC}"
+GANACHE_RPC_TOKEN="${TOKEN}"
+DEPLOYER_PRIVATE_KEY="${DEPLOYER_PK}"
+EOF
 
+chown "${GANACHE_USER}:${GANACHE_USER}" "${ENV_FILE}"
+chmod 600 "${ENV_FILE}"
+echo "  [OK] Generated credentials stored safely in ${ENV_FILE} (permissions 600)."
+
+# Create systemd service for Ganache
+GANACHE_BIN="$(which ganache)"
 cat <<EOF > /etc/systemd/system/ganache.service
 [Unit]
 Description=Ganache CLI Ethereum EVM Testnet for AgriTrace OS
@@ -167,115 +191,172 @@ systemctl enable ganache.service
 systemctl restart ganache.service
 sleep 3
 
-if systemctl is-active --quiet ganache.service; then
-    echo "  [OK] ganache.service is active and running!"
-else
-    echo "  [ERROR] ganache.service failed to start. Run 'journalctl -u ganache.service -e' for details."
+if ! systemctl is-active --quiet ganache.service; then
+    echo "[ERROR] ganache.service failed to start. Run 'journalctl -u ganache.service -n 50' to inspect."
+    exit 1
+fi
+echo "  [OK] ganache.service is active and bound to 127.0.0.1:${RPC_LOCAL_PORT}."
+
+# 7. Configure Nginx Reverse Proxy & Obtain Real Let's Encrypt TLS Certificate
+echo -e "\n[6/7] Configuring Nginx reverse proxy and acquiring TLS certificate..."
+
+# Initial Nginx config for Certbot validation (Port 80 HTTP with redirect)
+cat <<EOF > /etc/nginx/sites-available/ganache
+server {
+    listen 80;
+    server_name ${DOMAIN};
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/html;
+    }
+
+    location / {
+        return 301 https://\$host\$request_uri;
+    }
+}
+EOF
+
+mkdir -p /var/www/html
+rm -f /etc/nginx/sites-enabled/default
+ln -sf /etc/nginx/sites-available/ganache /etc/nginx/sites-enabled/ganache
+nginx -t
+systemctl restart nginx
+
+# Obtain TLS Certificate via Certbot
+echo "  [*] Executing Certbot TLS certificate generation for ${DOMAIN}..."
+if ! certbot certonly --webroot -w /var/www/html -d "${DOMAIN}" --non-interactive --agree-tos -m "admin@${DOMAIN}"; then
+    echo "[ERROR] Certbot failed to obtain a valid TLS certificate for '${DOMAIN}'."
+    echo "        HTTPS deployment failed. Public unencrypted HTTP access is blocked."
     exit 1
 fi
 
-# 7. Configure Nginx Reverse Proxy with Token Authentication
-echo -e "\n[6/7] Configuring Nginx reverse proxy with Bearer token authentication..."
+CERT_FILE="/etc/letsencrypt/live/${DOMAIN}/fullchain.pem"
+KEY_FILE="/etc/letsencrypt/live/${DOMAIN}/privkey.pem"
 
-cat <<'EOF' > /etc/nginx/sites-available/ganache
+if [ ! -f "${CERT_FILE}" ] || [ ! -f "${KEY_FILE}" ]; then
+    echo "[ERROR] Certificate verification failed: ${CERT_FILE} not found."
+    exit 1
+fi
+echo "  [OK] TLS certificate successfully provisioned and verified!"
+
+# Configure Hardened HTTPS Nginx site (Port 443 ONLY for RPC, Port 80 strictly redirects)
+cat <<EOF > /etc/nginx/sites-available/ganache
 server {
     listen 80;
-    server_name _;
+    server_name ${DOMAIN};
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/html;
+    }
+
+    location / {
+        return 301 https://\$host\$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl http2;
+    server_name ${DOMAIN};
+
+    ssl_certificate ${CERT_FILE};
+    ssl_certificate_key ${KEY_FILE};
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+    ssl_prefer_server_ciphers on;
 
     client_max_body_size 10M;
 
-    # CORS Headers for API verification
+    # CORS Headers
     add_header 'Access-Control-Allow-Origin' '*' always;
     add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS' always;
     add_header 'Access-Control-Allow-Headers' 'Content-Type, Authorization' always;
 
     location / {
-        if ($request_method = 'OPTIONS') {
+        if (\$request_method = 'OPTIONS') {
             return 204;
         }
 
         # Enforce Bearer Token Authentication
-        if ($http_authorization != "Bearer __TOKEN__") {
+        if (\$http_authorization != "Bearer ${TOKEN}") {
             return 401 '{"jsonrpc":"2.0","error":{"code":-32000,"message":"Unauthorized: Invalid or missing RPC Bearer Token"},"id":null}\n';
         }
 
-        proxy_pass http://127.0.0.1:8545;
+        proxy_pass http://127.0.0.1:${RPC_LOCAL_PORT};
         proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection "upgrade";
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
         proxy_read_timeout 60s;
     }
 }
 EOF
 
-sed -i "s/__TOKEN__/${TOKEN}/g" /etc/nginx/sites-available/ganache
-rm -f /etc/nginx/sites-enabled/default
-ln -sf /etc/nginx/sites-available/ganache /etc/nginx/sites-enabled/ganache
-
 nginx -t
 systemctl restart nginx
-echo "  [OK] Nginx configured and restarted."
+echo "  [OK] Nginx HTTPS reverse proxy is fully operational."
 
-# Configure TLS with Certbot if domain was provided
-if [ -n "${DOMAIN}" ]; then
-    echo "  [*] Configuring SSL certificate for domain: ${DOMAIN}..."
-    certbot --nginx -d "${DOMAIN}" --non-interactive --agree-tos -m "admin@${DOMAIN}" --redirect || {
-        echo "  [!] Notice: Certbot SSL setup did not complete. Ensure DNS points to this server and re-run certbot."
-    }
-fi
-
-# 8. Configure UFW Firewall (Port 8545 strictly internal)
-echo -e "\n[7/7] Hardening firewall with UFW (blocking raw 8545 from public internet)..."
+# 8. Configure UFW Firewall (Strict Isolation: Port 8545 blocked from internet)
+echo -e "\n[7/7] Hardening firewall with UFW (Port 8545 internal only)..."
 ufw default deny incoming
 ufw default allow outgoing
 ufw allow 22/tcp comment 'SSH'
-ufw allow 80/tcp comment 'HTTP'
-ufw allow 443/tcp comment 'HTTPS'
+ufw allow 80/tcp comment 'HTTP-Redirect'
+ufw allow 443/tcp comment 'HTTPS-RPC'
 ufw --force enable
-echo "  [OK] UFW active. Port 8545 is blocked externally and only accessible via Nginx."
+echo "  [OK] UFW firewall active: Port 8545 is strictly isolated to loopback."
 
-# 9. Verification & Summary
-echo -e "\nTesting local authenticated RPC call..."
-TEST_CALL=$(curl -s -X POST http://127.0.0.1 \
+# 9. Verify Live HTTPS RPC Endpoint
+echo -e "\nVerifying authenticated HTTPS RPC endpoint..."
+TEST_CALL="$(curl -s -X POST "https://${DOMAIN}" \
   -H "Authorization: Bearer ${TOKEN}" \
   -H "Content-Type: application/json" \
-  --data '{"jsonrpc":"2.0","method":"eth_chainId","params":[],"id":1}')
+  --data '{"jsonrpc":"2.0","method":"eth_chainId","params":[],"id":1}')"
 
-echo "  RPC Response: ${TEST_CALL}"
+if [[ "${TEST_CALL}" != *"0x539"* && "${TEST_CALL}" != *"1337"* ]]; then
+    echo "[ERROR] Local verification check failed. Output: ${TEST_CALL}"
+    exit 1
+fi
 
-PUBLIC_HOST="${DOMAIN:-<YOUR_VPS_PUBLIC_IP>}"
-SCHEME="http"
-[ -n "${DOMAIN}" ] && SCHEME="https"
+echo "  [OK] Verified RPC response: ${TEST_CALL}"
 
 echo ""
 echo "=================================================================="
-echo " [SUCCESS] Remote Ganache EVM Node is Ready!"
+echo " [SUCCESS] Remote Ganache EVM Node is Live and Secure with HTTPS!"
 echo "=================================================================="
-echo "  RPC Endpoint    : ${SCHEME}://${PUBLIC_HOST}"
-echo "  Chain ID        : ${CHAIN_ID}"
-echo "  RPC Auth Token  : ${TOKEN}"
-echo "  Deployer Key    : ${DEPLOYER_PK}"
+echo "  Endpoint URL   : https://${DOMAIN}"
+echo "  Chain ID       : ${CHAIN_ID}"
+echo "  RPC Security   : TLS 1.3 + Bearer Token Authentication"
+echo "  Port 8545      : Strictly blocked from public internet"
 echo ""
-echo "  Mapped Demo Account Addresses:"
+echo "  Mapped Public Demo Role Accounts:"
 echo "    farmer1   (Account 0): ${FARMER_ADDR}"
 echo "    supplier1 (Account 1): ${SUPPLIER_ADDR}"
 echo "    retailer1 (Account 2): ${RETAILER_ADDR}"
 echo "    consumer1 (Account 3): ${CONSUMER_ADDR}"
 echo "    admin1    (Account 4): ${ADMIN_ADDR}"
 echo ""
-echo "=== Required Next Steps ==="
-echo "1. Deploy the smart contract from your local machine:"
+echo "  [CONFIDENTIAL SECRETS NOTICE]"
+echo "  RPC Bearer Token & Deployer Private Key were saved to:"
+echo "    ${ENV_FILE} (permissions: 600, owned by ${GANACHE_USER})"
+echo "  To view them securely on this server, run:"
+echo "    sudo cat ${ENV_FILE}"
+echo "  NEVER commit or share secrets publicly."
+echo ""
+echo "=== Steps to Deploy Smart Contract & Wire Vercel ==="
+echo "1. On your development machine, set environment variables (avoid CLI argument logging):"
+echo "   export GANACHE_REMOTE_URL=\"https://${DOMAIN}\""
+echo "   export GANACHE_RPC_TOKEN=\"<TOKEN_FROM_ENV_FILE>\""
+echo "   export DEPLOYER_PRIVATE_KEY=\"<DEPLOYER_PK_FROM_ENV_FILE>\""
 echo "   cd blockchain"
-echo "   node scripts/deploy-remote.js ${SCHEME}://${PUBLIC_HOST} \"${TOKEN}\" \"${DEPLOYER_PK}\""
+echo "   node scripts/deploy-remote.js"
 echo ""
 echo "2. Add Environment Variables to your Vercel Backend:"
 echo "   cd backend"
-echo "   vercel env add GANACHE_RPC_URL production --value \"${SCHEME}://${PUBLIC_HOST}\""
-echo "   vercel env add GANACHE_RPC_TOKEN production --value \"${TOKEN}\""
+echo "   vercel env add GANACHE_RPC_URL production --value \"https://${DOMAIN}\""
+echo "   vercel env add GANACHE_RPC_TOKEN production --value \"<TOKEN_FROM_ENV_FILE>\""
 echo "   vercel env add GANACHE_CHAIN_ID production --value \"${CHAIN_ID}\""
 echo "   vercel env add GANACHE_CONTRACT_ADDRESS production --value \"<DEPLOYED_CONTRACT_ADDRESS>\""
 echo "   vercel env add DEMO_FARMER_WALLET production --value \"${FARMER_ADDR}\""
