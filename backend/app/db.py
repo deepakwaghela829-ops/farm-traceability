@@ -63,6 +63,37 @@ fallback_engine = create_engine(
 FallbackSessionLocal = sessionmaker(bind=fallback_engine, autocommit=False, autoflush=False, expire_on_commit=False)
 
 
+def ensure_crop_pricing_columns(target_engine) -> None:
+    """Ensure pricing workflow columns exist on crops table across PostgreSQL and SQLite."""
+    try:
+        with target_engine.connect() as conn:
+            dialect = target_engine.dialect.name
+            if dialect == "postgresql":
+                conn.execute(text("ALTER TABLE crops ADD COLUMN IF NOT EXISTS farmer_price_per_kg NUMERIC(10, 2);"))
+                conn.execute(text("ALTER TABLE crops ADD COLUMN IF NOT EXISTS retail_price_per_kg NUMERIC(10, 2);"))
+                conn.execute(text("ALTER TABLE crops ADD COLUMN IF NOT EXISTS retailer_markup_per_kg NUMERIC(10, 2) DEFAULT 30.00;"))
+                conn.execute(text("ALTER TABLE crops ADD COLUMN IF NOT EXISTS retail_confirmed_by VARCHAR(64);"))
+                conn.execute(text("ALTER TABLE crops ADD COLUMN IF NOT EXISTS retail_confirmed_at TIMESTAMP WITH TIME ZONE;"))
+                conn.commit()
+            elif dialect == "sqlite":
+                result = conn.execute(text("PRAGMA table_info(crops)")).fetchall()
+                existing_cols = {row[1] for row in result}
+                if existing_cols:
+                    if "farmer_price_per_kg" not in existing_cols:
+                        conn.execute(text("ALTER TABLE crops ADD COLUMN farmer_price_per_kg NUMERIC(10, 2);"))
+                    if "retail_price_per_kg" not in existing_cols:
+                        conn.execute(text("ALTER TABLE crops ADD COLUMN retail_price_per_kg NUMERIC(10, 2);"))
+                    if "retailer_markup_per_kg" not in existing_cols:
+                        conn.execute(text("ALTER TABLE crops ADD COLUMN retailer_markup_per_kg NUMERIC(10, 2) DEFAULT 30.00;"))
+                    if "retail_confirmed_by" not in existing_cols:
+                        conn.execute(text("ALTER TABLE crops ADD COLUMN retail_confirmed_by VARCHAR(64);"))
+                    if "retail_confirmed_at" not in existing_cols:
+                        conn.execute(text("ALTER TABLE crops ADD COLUMN retail_confirmed_at TIMESTAMP;"))
+                    conn.commit()
+    except Exception as exc:
+        logger.debug("Column presence verification notice: %s", exc)
+
+
 def check_database_health() -> dict:
     if _db_url.startswith("sqlite"):
         return {

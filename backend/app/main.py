@@ -143,16 +143,18 @@ def startup_event():
 
     # Local development & viva environment initialization
     try:
-        from app.db import Base, primary_engine, PrimarySessionLocal
+        from app.db import Base, ensure_crop_pricing_columns, primary_engine, PrimarySessionLocal
         Base.metadata.create_all(bind=primary_engine, checkfirst=True)
+        ensure_crop_pricing_columns(primary_engine)
         from app.seed_demo_users import seed_users
         seed_users(target_engine=primary_engine, target_sessionmaker=PrimarySessionLocal, sync_passwords=sync_requested)
     except Exception as exc:
         logger.warning("Primary database local startup notice: %s", exc)
 
     try:
-        from app.db import Base, fallback_engine, FallbackSessionLocal
+        from app.db import Base, ensure_crop_pricing_columns, fallback_engine, FallbackSessionLocal
         Base.metadata.create_all(bind=fallback_engine, checkfirst=True)
+        ensure_crop_pricing_columns(fallback_engine)
         from app.seed_demo_users import seed_users
         seed_users(target_engine=fallback_engine, target_sessionmaker=FallbackSessionLocal, sync_passwords=sync_requested)
     except Exception as exc:

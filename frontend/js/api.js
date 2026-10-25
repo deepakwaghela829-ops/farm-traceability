@@ -99,3 +99,23 @@ export async function fetchCropPredictionApi(cropId) {
 export async function fetchCropBenchmarksApi(cropType) {
   return request(`/api/prediction/benchmarks/${encodeURIComponent(cropType)}`);
 }
+
+// 5. Pricing Workflow API
+export async function confirmRetailPriceApi(cropId, token, markupPerKg = 30.00) {
+  const headers = token ? { Authorization: `Bearer ${token}` } : {};
+  return request(`/api/crops/${cropId}/confirm-retail-price`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ markup_per_kg: markupPerKg })
+  });
+}
+
+export async function updateFarmerPriceApi(cropId, farmerPricePerKg, token) {
+  const headers = token ? { Authorization: `Bearer ${token}` } : {};
+  return request(`/api/crops/${cropId}/farmer-price`, {
+    method: 'PATCH',
+    headers,
+    body: JSON.stringify({ farmer_price_per_kg: farmerPricePerKg })
+  });
+}
+

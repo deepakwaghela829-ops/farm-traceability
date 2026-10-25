@@ -122,6 +122,11 @@ export async function resolveCropProvenance(inputId) {
       isHarvested: harvested,
       txHash: dbCrop?.blockchain_tx_hash || '—',
       blockNumber: dbCrop?.blockchain_block_number || '—',
+      farmerPricePerKg: dbCrop?.farmer_price_per_kg != null ? Number(dbCrop.farmer_price_per_kg) : null,
+      retailPricePerKg: dbCrop?.retail_price_per_kg != null ? Number(dbCrop.retail_price_per_kg) : null,
+      retailerMarkupPerKg: dbCrop?.retailer_markup_per_kg != null ? Number(dbCrop.retailer_markup_per_kg) : null,
+      retailConfirmedBy: dbCrop?.retail_confirmed_by || null,
+      retailConfirmedAt: dbCrop?.retail_confirmed_at || null,
     };
 
     return {
@@ -171,6 +176,11 @@ export async function resolveCropProvenance(inputId) {
       isHarvested: isHarvestedNow,
       txHash: dbCrop.blockchain_tx_hash || '—',
       blockNumber: dbCrop.blockchain_block_number || '—',
+      farmerPricePerKg: dbCrop.farmer_price_per_kg != null ? Number(dbCrop.farmer_price_per_kg) : null,
+      retailPricePerKg: dbCrop.retail_price_per_kg != null ? Number(dbCrop.retail_price_per_kg) : null,
+      retailerMarkupPerKg: dbCrop.retailer_markup_per_kg != null ? Number(dbCrop.retailer_markup_per_kg) : null,
+      retailConfirmedBy: dbCrop.retail_confirmed_by || null,
+      retailConfirmedAt: dbCrop.retail_confirmed_at || null,
     };
 
     return {
@@ -393,27 +403,68 @@ export function renderTraceabilityHTML(resolution, aiPrediction = null) {
         </div>
       </div>
 
-      <!-- AI Estimated Reference Price Card (Section 16) -->
-      <div class="card" style="margin-bottom: 0; background: var(--bg-surface); border-color: var(--primary-border); display: flex; flex-direction: column; justify-content: space-between;">
+      <!-- Verified Consumer Retail Price Card -->
+      <div class="card" style="margin-bottom: 0; background: var(--bg-surface); border-color: ${c.retailPricePerKg != null ? 'var(--primary-border)' : 'var(--warning-border, #f59e0b)'}; display: flex; flex-direction: column; justify-content: space-between;">
         <div>
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
             <span style="font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted);">
-              AI Market Intelligence
+              Consumer Pricing
             </span>
-            <span class="badge badge-info" style="font-size: 11px;">Random Forest</span>
+            ${
+              c.retailPricePerKg != null
+                ? `<span class="badge badge-success" style="font-size: 11px;">✓ Retail Price Confirmed</span>`
+                : `<span class="badge badge-warning" style="font-size: 11px;">⏳ Pricing Pending</span>`
+            }
           </div>
-          <div style="font-size: 32px; font-weight: 800; color: #34d399; margin: 6px 0;">
-            ₹${Number(referencePrice).toFixed(2)} <span style="font-size: 14px; font-weight: 500; color: var(--text-muted);">/ ${c.unit || 'kg'}</span>
-          </div>
-          <div style="font-size: 13px; font-weight: 600; color: #ffffff; margin-bottom: 4px;">
-            AI Estimated Reference Price
-          </div>
-          <p style="font-size: 12px; color: var(--text-muted); line-height: 1.5; margin: 0;">
-            Reference estimate based on historical and market-related inputs.
-          </p>
+
+          ${
+            c.retailPricePerKg != null
+              ? `
+              <div style="font-size: 34px; font-weight: 800; color: #34d399; margin: 6px 0;">
+                ₹${c.retailPricePerKg.toFixed(2)} <span style="font-size: 15px; font-weight: 500; color: var(--text-muted);">/ kg</span>
+              </div>
+              <div style="font-size: 13px; font-weight: 600; color: #ffffff; margin-bottom: 8px;">
+                Verified Retail Price
+              </div>
+              <div style="background: rgba(255,255,255,0.03); border: 1px solid var(--border-color); border-radius: 6px; padding: 10px 12px; margin-bottom: 10px; font-size: 12px;">
+                <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                  <span style="color: var(--text-muted);">Registered Farm-Gate Price:</span>
+                  <strong>₹${c.farmerPricePerKg != null ? c.farmerPricePerKg.toFixed(2) : '—'} / kg</strong>
+                </div>
+                <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                  <span style="color: var(--text-muted);">Fixed Retailer Markup:</span>
+                  <strong>+ ₹30.00 / kg</strong>
+                </div>
+                <div style="border-top: 1px solid var(--border-color); padding-top: 4px; display: flex; justify-content: space-between; color: #34d399; font-weight: 700;">
+                  <span>Published Shelf Price:</span>
+                  <span>₹${c.retailPricePerKg.toFixed(2)} / kg</span>
+                </div>
+              </div>
+              <div style="font-size: 11px; color: var(--text-dim);">
+                Confirmed by: <strong style="color: var(--text-secondary);">${c.retailConfirmedBy || 'Retailer'}</strong>
+              </div>
+              `
+              : `
+              <div style="font-size: 24px; font-weight: 700; color: #f59e0b; margin: 10px 0;">
+                Retail Pricing Pending
+              </div>
+              <p style="font-size: 13px; color: var(--text-muted); line-height: 1.5; margin-bottom: 12px;">
+                The retailer has not yet confirmed the retail price for this produce batch. Verified consumer shelf pricing will appear once received into retail inventory.
+              </p>
+              ${
+                c.farmerPricePerKg != null
+                  ? `
+                  <div style="font-size: 12px; color: var(--text-secondary); background: rgba(255,255,255,0.02); padding: 8px 10px; border-radius: 6px; border: 1px solid var(--border-color);">
+                    Registered Farm-Gate Price: <strong>₹${c.farmerPricePerKg.toFixed(2)} / kg</strong>
+                  </div>
+                  `
+                  : ''
+              }
+              `
+          }
         </div>
         <div style="font-size: 11px; color: var(--text-dim); border-top: 1px solid var(--border-color); padding-top: 10px; margin-top: 14px;">
-          Note: This reference price is indicative and does not represent a contractual guarantee.
+          Pricing policy: Fixed transparent ₹30/kg retailer markup enforced by AgriTrace OS.
         </div>
       </div>
     </div>

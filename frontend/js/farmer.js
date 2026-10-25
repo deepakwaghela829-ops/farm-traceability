@@ -295,6 +295,18 @@ function renderMyCropsView(container, parentContainer) {
           <div style="font-size: 12px; color: var(--text-muted);">${c.crop_type}</div>
         </td>
         <td><strong>${c.quantity}</strong> ${c.unit}</td>
+        <td>
+          <strong style="color: #34d399;">
+            ${c.farmer_price_per_kg != null ? `₹${Number(c.farmer_price_per_kg).toFixed(2)}/kg` : '<span style="color:var(--text-muted); font-size:12px;">Not Set</span>'}
+          </strong>
+        </td>
+        <td>
+          ${
+            c.retail_price_per_kg != null
+              ? `<span class="badge badge-success" title="Confirmed by ${c.retail_confirmed_by || 'Retailer'}">₹${Number(c.retail_price_per_kg).toFixed(2)}/kg</span>`
+              : `<span class="badge badge-warning" style="font-size: 11px;">Pending</span>`
+          }
+        </td>
         <td>${c.cultivation_date || 'N/A'}</td>
         <td>${c.expected_harvest_date || 'N/A'}</td>
         <td>${c.location}</td>
@@ -330,6 +342,8 @@ function renderMyCropsView(container, parentContainer) {
               <th>ID</th>
               <th>Crop Name & Type</th>
               <th>Quantity</th>
+              <th>Farm-Gate Price</th>
+              <th>Retail Price</th>
               <th>Cultivation Date</th>
               <th>Expected Harvest</th>
               <th>Location</th>
@@ -438,6 +452,41 @@ function openRegisterCropModal(parentContainer) {
         </div>
       </div>
 
+      <!-- Pricing Workflow Section -->
+      <div style="margin-top: 16px; border-top: 1px solid var(--border-color); padding-top: 16px;">
+        <div style="font-size: 12px; font-weight: 700; text-transform: uppercase; color: var(--primary); letter-spacing: 0.05em; margin-bottom: 12px;">
+          3. Farm-Gate Pricing (AI Assisted)
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start;">
+          <div style="background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 14px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+              <span style="font-size: 12px; color: var(--text-muted); font-weight: 600;">AI Suggested Farm-Gate Price</span>
+              <span id="reg-ai-price-badge" class="badge badge-info" style="font-size: 11px;">Indicative AI</span>
+            </div>
+            <div style="display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px;">
+              <span id="reg-ai-suggested-display" style="font-size: 26px; font-weight: 800; color: #34d399;">₹45.00</span>
+              <span style="font-size: 13px; color: var(--text-muted);">/ kg</span>
+              <button type="button" id="reg-use-ai-price-btn" class="btn btn-secondary btn-sm" style="margin-left: auto; padding: 4px 10px; font-size: 12px;">
+                Use Suggestion
+              </button>
+            </div>
+            <div style="font-size: 11px; color: var(--text-dim); line-height: 1.4;">
+              Indicative estimate based on market benchmark data (Holdout MAE ±₹1.84/kg). Final price decision is yours.
+            </div>
+          </div>
+
+          <div>
+            <div class="form-group" style="margin-bottom: 6px;">
+              <label class="form-label" for="reg-farmer-price">Your Farm-Gate Price (₹ / kg) <span style="color:var(--danger)">*</span></label>
+              <input type="number" id="reg-farmer-price" class="form-control" placeholder="e.g. 50.00" min="1" step="0.01" value="50.00" required />
+            </div>
+            <small style="font-size: 11px; color: var(--text-muted); display: block;">
+              Price you receive per kg. Retailers add a fixed ₹30.00/kg markup when selling to consumers.
+            </small>
+          </div>
+        </div>
+      </div>
+
       <div id="reg-error-msg" style="display:none; padding:10px 14px; border-radius:6px; font-size:13px; margin-bottom:16px; background:var(--danger-subtle); border:1px solid var(--danger-border); color:#fca5a5;"></div>
 
       <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:20px; border-top:1px solid var(--border-color); padding-top:16px;">
@@ -457,6 +506,39 @@ function openRegisterCropModal(parentContainer) {
     modal.style.display = 'none';
   });
 
+  // Dynamic AI Suggested Price preview for crop registration
+  let latestAiPrice = 45.00;
+  async function refreshAiSuggestion() {
+    const cType = body.querySelector('#reg-crop-type')?.value || 'Banana';
+    const loc = body.querySelector('#reg-location')?.value.trim() || 'Nashik';
+    const qty = parseFloat(body.querySelector('#reg-crop-quantity')?.value) || 500;
+    try {
+      const pred = await predictCropPriceApi({
+        crop_type: cType,
+        historical_price: 4000,
+        season: 'Monsoon',
+        location: loc,
+        demand: 0.8,
+        production_quantity: qty,
+      });
+      if (pred && pred.predicted_price) {
+        latestAiPrice = pred.predicted_price;
+        const display = body.querySelector('#reg-ai-suggested-display');
+        if (display) display.innerText = `₹${latestAiPrice.toFixed(2)}`;
+      }
+    } catch {}
+  }
+
+  body.querySelector('#reg-crop-type')?.addEventListener('change', refreshAiSuggestion);
+  body.querySelector('#reg-location')?.addEventListener('change', refreshAiSuggestion);
+  body.querySelector('#reg-use-ai-price-btn')?.addEventListener('click', () => {
+    const input = body.querySelector('#reg-farmer-price');
+    if (input && latestAiPrice) {
+      input.value = latestAiPrice.toFixed(2);
+    }
+  });
+  refreshAiSuggestion();
+
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     submitBtn.disabled = true;
@@ -470,6 +552,16 @@ function openRegisterCropModal(parentContainer) {
     const cultivationDate = body.querySelector('#reg-cultivation-date').value;
     const expectedHarvest = body.querySelector('#reg-expected-harvest').value;
     const location = body.querySelector('#reg-location').value.trim();
+
+    const farmerPriceInput = body.querySelector('#reg-farmer-price')?.value.trim();
+    const farmerPrice = parseFloat(farmerPriceInput);
+    if (isNaN(farmerPrice) || farmerPrice < 1.00) {
+      errorMsg.style.display = 'block';
+      errorMsg.innerText = 'Please enter a valid farm-gate price (minimum ₹1.00/kg).';
+      submitBtn.disabled = false;
+      submitBtn.innerText = 'Register Crop';
+      return;
+    }
 
     if (new Date(expectedHarvest) < new Date(cultivationDate)) {
       errorMsg.style.display = 'block';
@@ -518,6 +610,7 @@ function openRegisterCropModal(parentContainer) {
         expected_harvest_date: expectedHarvest,
         location,
         farmer_id: user?.username || 'farmer1',
+        farmer_price_per_kg: farmerPrice,
         ...(chainRes
           ? {
               blockchain_crop_id: chainRes.blockchainCropId,
@@ -547,18 +640,16 @@ function openRegisterCropModal(parentContainer) {
               <div style="font-size: 18px; font-weight: 800; color: var(--primary);">#${created.crop_id}</div>
             </div>
             <div>
-              <span style="font-size: 11px; text-transform: uppercase; color: var(--text-dim); font-weight: 700;">Blockchain Status</span>
-              <div>
-                ${
-                  created.blockchain_crop_id
-                    ? `<span class="badge badge-success">✓ On-Chain #${created.blockchain_crop_id}</span>`
-                    : `<span class="badge badge-warning">• Database Record</span>`
-                }
-              </div>
+              <span style="font-size: 11px; text-transform: uppercase; color: var(--text-dim); font-weight: 700;">Farm-Gate Price</span>
+              <div style="font-size: 18px; font-weight: 800; color: #34d399;">₹${Number(created.farmer_price_per_kg || farmerPrice).toFixed(2)}/kg</div>
             </div>
             <div style="grid-column: span 2; margin-top: 6px; border-top: 1px solid var(--border-color); padding-top: 10px;">
               <span style="font-size: 11px; text-transform: uppercase; color: var(--text-dim); font-weight: 700;">Crop Name & Quantity</span>
               <div style="font-weight: 600;">${created.crop_name} (${created.quantity} ${created.unit})</div>
+            </div>
+            <div style="grid-column: span 2;">
+              <span style="font-size: 11px; text-transform: uppercase; color: var(--text-dim); font-weight: 700;">Retail Markup Policy</span>
+              <div style="font-size: 12px; color: var(--text-muted);">Retailers will add fixed ₹30.00/kg markup (Final Shelf Price: ₹${(Number(created.farmer_price_per_kg || farmerPrice) + 30).toFixed(2)}/kg)</div>
             </div>
           </div>
 
@@ -702,16 +793,40 @@ function renderPricingView(container) {
       resultDiv.innerHTML = `
         <div style="background: var(--bg-surface); border: 1px solid var(--primary-border); border-radius: var(--radius-lg); padding: 24px; text-align: center;">
           <span style="font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted);">
-            AI Estimated Reference Price
+            AI Suggested Farm-Gate Price
           </span>
-          <div style="font-size: 36px; font-weight: 800; color: #34d399; margin: 8px 0;">
+          <div style="font-size: 38px; font-weight: 800; color: #34d399; margin: 8px 0;">
             ₹${res.predicted_price.toFixed(2)} <span style="font-size: 16px; font-weight: 500; color: var(--text-muted);">/ ${res.unit || 'kg'}</span>
           </div>
-          <p style="font-size: 13px; color: var(--text-muted); max-width: 500px; margin: 0 auto 16px;">
-            Reference estimate based on historical and market-related inputs.
+          <div style="font-size: 14px; color: var(--text-secondary); margin-bottom: 16px;">
+            Equivalent Mandi Benchmark: <strong>₹${(res.predicted_price * 100).toFixed(2)} / quintal</strong>
+          </div>
+
+          <!-- Model Evaluation Metrics Card -->
+          <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 14px; text-align: center; margin-bottom: 16px;">
+            <div>
+              <span style="font-size: 11px; text-transform: uppercase; color: var(--text-dim); font-weight: 700;">Holdout MAE</span>
+              <div style="font-size: 15px; font-weight: 700; color: #ffffff;">±₹1.84 / kg</div>
+              <span style="font-size: 10px; color: var(--text-muted);">(±₹183.80/qtl)</span>
+            </div>
+            <div>
+              <span style="font-size: 11px; text-transform: uppercase; color: var(--text-dim); font-weight: 700;">Holdout RMSE</span>
+              <div style="font-size: 15px; font-weight: 700; color: #ffffff;">±₹3.00 / kg</div>
+              <span style="font-size: 10px; color: var(--text-muted);">(±₹300.36/qtl)</span>
+            </div>
+            <div>
+              <span style="font-size: 11px; text-transform: uppercase; color: var(--text-dim); font-weight: 700;">R² Score</span>
+              <div style="font-size: 15px; font-weight: 700; color: #34d399;">0.9635</div>
+              <span style="font-size: 10px; color: var(--text-muted);">(52 records)</span>
+            </div>
+          </div>
+
+          <p style="font-size: 12px; color: var(--text-muted); max-width: 550px; margin: 0 auto 16px; line-height: 1.5;">
+            * Note: Predictions are indicative benchmark estimates. Farmers retain independent authority to set their final selling price upon crop registration.
           </p>
-          <div style="display: inline-flex; gap: 16px; font-size: 12px; color: var(--text-dim); border-top: 1px solid var(--border-color); padding-top: 12px;">
-            <span>Model: ${res.model_name || 'Random Forest'}</span> &bull;
+
+          <div style="display: inline-flex; gap: 16px; font-size: 12px; color: var(--text-dim); border-top: 1px solid var(--border-color); padding-top: 12px; flex-wrap: wrap; justify-content: center;">
+            <span>Model: ${res.model_name || 'Random Forest Regressor'}</span> &bull;
             <span>Currency: INR (₹)</span> &bull;
             <span>Date: ${res.prediction_date || 'Today'}</span>
           </div>

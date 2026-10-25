@@ -1,4 +1,5 @@
-﻿from datetime import date, datetime
+from datetime import date, datetime
+from decimal import Decimal
 
 from sqlalchemy import Date, DateTime, Integer, Numeric, String, func
 from sqlalchemy.orm import Mapped, mapped_column
@@ -18,6 +19,15 @@ class Crop(Base):
     cultivation_date: Mapped[date] = mapped_column(Date, nullable=False)
     expected_harvest_date: Mapped[date] = mapped_column(Date, nullable=False)
     location: Mapped[str] = mapped_column(String(200), nullable=False)
+
+    # Pricing workflow fields (INR per kg)
+    farmer_price_per_kg: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), nullable=True)
+    retail_price_per_kg: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), nullable=True)
+    retailer_markup_per_kg: Mapped[Decimal | None] = mapped_column(
+        Numeric(10, 2), nullable=True, default=Decimal("30.00")
+    )
+    retail_confirmed_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    retail_confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     blockchain_crop_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     blockchain_tx_hash: Mapped[str | None] = mapped_column(String(66), nullable=True, index=True)

@@ -1,5 +1,5 @@
 // retailer.js - Retailer Portal Logic for AgriTrace OS
-import { fetchCropsApi, saveTransactionApi } from './api.js';
+import { fetchCropsApi, saveTransactionApi, confirmRetailPriceApi } from './api.js';
 import { getAccounts, transferCropOnChain } from './blockchain.js';
 import { resolveCropProvenance, renderTraceabilityHTML } from './traceability.js';
 import { renderQRCode, getConsumerTraceUrl } from './qr.js';
@@ -132,6 +132,10 @@ export async function renderRetailerView(container) {
 function renderInventoryView(container, parentContainer, stats) {
   const rows = cachedCrops.map((c) => {
     const isChain = c.blockchain_crop_id != null;
+    const farmerPrice = c.farmer_price_per_kg != null ? Number(c.farmer_price_per_kg) : null;
+    const retailPrice = c.retail_price_per_kg != null ? Number(c.retail_price_per_kg) : null;
+    const isConfirmed = retailPrice != null;
+
     return `
       <tr>
         <td><strong style="color: var(--primary);">#${c.crop_id}</strong></td>
@@ -140,8 +144,23 @@ function renderInventoryView(container, parentContainer, stats) {
           <div style="font-size: 12px; color: var(--text-muted);">${c.crop_type}</div>
         </td>
         <td><strong>${c.quantity}</strong> ${c.unit}</td>
+        <td>
+          ${
+            farmerPrice != null
+              ? `<strong style="color: #34d399;">₹${farmerPrice.toFixed(2)}/kg</strong>`
+              : `<span style="color: var(--text-muted); font-size: 12px;">Not Set</span>`
+          }
+        </td>
+        <td>
+          ${
+            isConfirmed
+              ? `<div><strong style="color: #34d399;">₹${retailPrice.toFixed(2)}/kg</strong> <span class="badge badge-success" style="font-size:10px;">✓ Published</span></div><div style="font-size: 10px; color: var(--text-dim);">(₹${farmerPrice ? farmerPrice.toFixed(2) : '0'} + ₹30 markup)</div>`
+              : farmerPrice != null
+              ? `<div><strong style="color: #f59e0b;">₹${(farmerPrice + 30).toFixed(2)}/kg</strong> <span class="badge badge-warning" style="font-size:10px;">Unconfirmed</span></div><div style="font-size: 10px; color: var(--text-dim);">(Awaiting Confirmation)</div>`
+              : `<span style="color: var(--text-muted); font-size: 12px;">Farmer Price Required</span>`
+          }
+        </td>
         <td>${c.farmer_id || 'Farmer'}</td>
-        <td>${c.location}</td>
         <td>
           ${
             isChain
@@ -152,6 +171,11 @@ function renderInventoryView(container, parentContainer, stats) {
         <td style="text-align: right; white-space: nowrap;">
           <button class="btn btn-secondary btn-sm retailer-btn-view" data-id="${c.crop_id}" style="margin-right: 4px;">View</button>
           <button class="btn btn-secondary btn-sm retailer-btn-receive" data-id="${c.crop_id}" style="margin-right: 4px;">Receive</button>
+          ${
+            !isConfirmed
+              ? `<button class="btn btn-secondary btn-sm retailer-btn-confirm-price" data-id="${c.crop_id}" style="margin-right: 4px;" title="Confirm ₹30/kg retail markup">Confirm Price</button>`
+              : `<span class="badge badge-success" style="margin-right: 4px; font-size: 11px;">✓ Confirmed</span>`
+          }
           <button class="btn btn-primary btn-sm retailer-btn-qr" data-id="${c.crop_id}">
             ${icons.qr} <span>Generate QR</span>
           </button>
@@ -201,8 +225,8 @@ function renderInventoryView(container, parentContainer, stats) {
     <div class="card">
       <div class="card-header">
         <div>
-          <h3>Store Inventory</h3>
-          <p>Verified produce available for retail customer verification and dispatch</p>
+          <h3>Store Inventory & Pricing</h3>
+          <p>Verified produce available for retail customer verification, markup confirmation, and dispatch</p>
         </div>
         <span class="badge badge-info">${cachedCrops.length} products listed</span>
       </div>
@@ -222,8 +246,9 @@ function renderInventoryView(container, parentContainer, stats) {
                   <th>ID</th>
                   <th>Product</th>
                   <th>Quantity</th>
+                  <th>Farm-Gate Price</th>
+                  <th>Retail Price (Farmer + ₹30)</th>
                   <th>Origin</th>
-                  <th>Location</th>
                   <th>Status</th>
                   <th style="text-align: right;">Actions</th>
                 </tr>
@@ -316,6 +341,38 @@ function renderInventoryView(container, parentContainer, stats) {
         btn.disabled = false;
         btn.innerText = 'Receive';
         alert('Could not record receipt: ' + err.message);
+      }
+    });
+  });
+
+  // Bind Confirm Retail Price
+  container.querySelectorAll('.retailer-btn-confirm-price').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const cropId = btn.getAttribute('data-id');
+      const crop = cachedCrops.find((c) => String(c.crop_id) === String(cropId));
+      if (!crop) return;
+
+      if (!crop.farmer_price_per_kg) {
+        alert('Cannot confirm retail price: Farm-gate price has not been set by farmer.');
+        return;
+      }
+
+      btn.disabled = true;
+      btn.innerText = 'Confirming...';
+
+      try {
+        const token = getToken();
+        await confirmRetailPriceApi(crop.crop_id, token, 30.00);
+        btn.innerText = '✓ Confirmed';
+        btn.classList.remove('btn-secondary');
+        btn.classList.add('btn-primary');
+        setTimeout(() => {
+          renderRetailerView(parentContainer);
+        }, 1000);
+      } catch (err) {
+        btn.disabled = false;
+        btn.innerText = 'Confirm Price';
+        alert(err.message || 'Could not confirm retail price. Ensure the consignment is received into inventory first.');
       }
     });
   });

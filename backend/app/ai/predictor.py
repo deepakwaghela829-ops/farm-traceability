@@ -39,9 +39,13 @@ def get_market_benchmarks() -> dict:
     df = pd.read_csv(DATA_PATH)
     benchmarks = {}
     for crop, group in df.groupby("crop_type"):
+        avg_quintal = float(round(group["historical_price"].mean(), 2))
+        avg_kg = float(round(avg_quintal / 100.0, 2))
         benchmarks[crop.strip().lower()] = {
             "crop_type": crop,
-            "avg_historical_price": float(round(group["historical_price"].mean(), 2)),
+            "avg_historical_price": avg_quintal,
+            "avg_historical_price_per_quintal": avg_quintal,
+            "avg_historical_price_per_kg": avg_kg,
             "avg_demand": float(round(group["demand"].mean(), 2)),
             "default_season": group["season"].mode().iloc[0] if not group["season"].empty else "Monsoon",
             "default_location": group["location"].mode().iloc[0] if not group["location"].empty else "Palghar",
@@ -49,9 +53,13 @@ def get_market_benchmarks() -> dict:
         }
 
     # Overall dataset fallbacks
+    overall_quintal = float(round(df["historical_price"].mean(), 2))
+    overall_kg = float(round(overall_quintal / 100.0, 2))
     overall = {
         "crop_type": "General",
-        "avg_historical_price": float(round(df["historical_price"].mean(), 2)),
+        "avg_historical_price": overall_quintal,
+        "avg_historical_price_per_quintal": overall_quintal,
+        "avg_historical_price_per_kg": overall_kg,
         "avg_demand": float(round(df["demand"].mean(), 2)),
         "default_season": "Monsoon",
         "default_location": "Palghar",
@@ -69,28 +77,28 @@ def predict_price(
     location: str,
     demand: float,
     production_quantity: float,
+    output_unit: str = "kg",
 ) -> float:
     """
-    Predict the future crop price using the trained Random Forest ML pipeline.
+    Predict crop price using the trained Random Forest ML pipeline.
 
-    Inputs:
-    - crop_type: e.g. Banana, Tomato, Onion
-    - historical_price: Historical price benchmark
-    - season: e.g. Monsoon, Winter, Summer
-    - location: e.g. Palghar, Nashik
-    - demand: Relative market demand score (e.g. 0.8)
-    - production_quantity: Production quantity
-
-    Returns:
-    - Predicted price rounded to 2 decimal places.
+    The model was trained on APMC market benchmarks in INR per quintal (1 quintal = 100 kg).
+    - If historical_price < 200, it is treated as INR/kg and scaled to quintal for the model.
+    - If historical_price >= 200, it is treated as INR/quintal directly.
+    - If output_unit == "kg" (default), converts the quintal prediction to INR/kg (/ 100).
+    - If output_unit == "quintal", returns INR/quintal directly.
     """
     model = get_model()
+
+    model_historical_price = float(historical_price)
+    if model_historical_price < 200.0:
+        model_historical_price = model_historical_price * 100.0
 
     input_data = pd.DataFrame(
         [
             {
                 "crop_type": crop_type,
-                "historical_price": historical_price,
+                "historical_price": model_historical_price,
                 "season": season,
                 "location": location,
                 "demand": demand,
@@ -100,8 +108,36 @@ def predict_price(
     )
 
     prediction = model.predict(input_data)
-    predicted_price = float(prediction[0])
-    return round(predicted_price, 2)
+    predicted_quintal = float(prediction[0])
+
+    if output_unit == "quintal":
+        return round(predicted_quintal, 2)
+    # Default is per kg (1 quintal = 100 kg)
+    return round(predicted_quintal / 100.0, 2)
+
+
+def predict_price_breakdown(
+    crop_type: str,
+    historical_price: float,
+    season: str,
+    location: str,
+    demand: float,
+    production_quantity: float,
+) -> dict:
+    price_kg = predict_price(
+        crop_type=crop_type,
+        historical_price=historical_price,
+        season=season,
+        location=location,
+        demand=demand,
+        production_quantity=production_quantity,
+        output_unit="kg",
+    )
+    price_quintal = round(price_kg * 100.0, 2)
+    return {
+        "price_per_kg": price_kg,
+        "price_per_quintal": price_quintal,
+    }
 
 
 if __name__ == "__main__":

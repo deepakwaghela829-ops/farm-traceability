@@ -51,10 +51,25 @@ class PricePredictionRequest(BaseModel):
 class PricePredictionResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
-    predicted_price: float = Field(..., description="Predicted crop price estimate")
+    predicted_price: float = Field(..., description="Predicted crop price estimate in INR per kg")
+    predicted_price_per_kg: float = Field(..., description="Predicted crop price in INR/kg")
+    predicted_price_per_quintal: float = Field(..., description="Predicted crop price in INR/quintal")
     currency: str = Field(default="INR", description="Currency symbol/code")
     unit: str = Field(default="kg", description="Unit")
+    is_indicative: bool = Field(default=True, description="Whether prediction is an indicative benchmark estimate")
     model_name: str = Field(default="Random Forest Regressor", description="Model name")
+    evaluation_metrics: dict | None = Field(
+        default={
+            "mae_per_quintal": 183.80,
+            "mae_per_kg": 1.84,
+            "rmse_per_quintal": 300.36,
+            "rmse_per_kg": 3.00,
+            "r2": 0.9635,
+            "sample_size": 52,
+            "note": "Evaluated on holdout test set (52 benchmark records). Indicative estimate.",
+        },
+        description="Model evaluation metrics on holdout data",
+    )
     prediction_date: str = Field(..., description="Date of prediction in DD/MM/YYYY or ISO format")
     crop_id: int | None = Field(default=None, description="Associated Crop ID")
     crop_type: str = Field(..., description="Crop type")
@@ -68,6 +83,8 @@ class PricePredictionResponse(BaseModel):
 class BenchmarkFeaturesResponse(BaseModel):
     crop_type: str
     historical_price: float
+    historical_price_per_kg: float | None = None
+    historical_price_per_quintal: float | None = None
     demand: float
     season: str
     location: str
