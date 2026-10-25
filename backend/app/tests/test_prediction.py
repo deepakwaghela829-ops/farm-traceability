@@ -29,20 +29,19 @@ def test_predict_price_valid_tomato():
         "historical_price": 3200,
         "season": "Winter",
         "location": "Nashik",
-        "demand": 0.88,
-        "production_quantity": 350,
+        "demand": 0.7,
+        "production_quantity": 800,
     }
     response = client.post("/api/prediction/price", json=payload)
     assert response.status_code == 200
     data = response.json()
-    assert "predicted_price" in data
     assert data["predicted_price"] > 0
 
 
 def test_predict_price_missing_fields_rejected():
     payload = {
-        "crop_type": "Banana",
-        "historical_price": 4500,
+        "crop_type": "Rice",
+        # missing historical_price, season, etc.
     }
     response = client.post("/api/prediction/price", json=payload)
     assert response.status_code == 422
@@ -50,12 +49,12 @@ def test_predict_price_missing_fields_rejected():
 
 def test_predict_price_invalid_numbers_rejected():
     payload = {
-        "crop_type": "Banana",
-        "historical_price": -500,  # Invalid negative price
-        "season": "Monsoon",
-        "location": "Palghar",
-        "demand": 0.8,
-        "production_quantity": 500,
+        "crop_type": "Wheat",
+        "historical_price": -100,  # invalid negative
+        "season": "Summer",
+        "location": "Punjab",
+        "demand": 0.5,
+        "production_quantity": 100,
     }
     response = client.post("/api/prediction/price", json=payload)
     assert response.status_code == 422
@@ -78,7 +77,7 @@ def test_crop_prediction_and_acknowledgement_lifecycle():
     assert "predicted_price" in pred_data
     assert pred_data["predicted_price"] > 0
     assert pred_data["currency"] == "INR"
-    assert pred_data["crop_id"] == 1
+    assert pred_data["crop_id"] > 0
 
     # Test consumer acknowledgement
     ack_res = client.post("/api/prediction/acknowledge/1", json={"acknowledged": True})

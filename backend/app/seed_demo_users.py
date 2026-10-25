@@ -116,18 +116,20 @@ DEFAULT_DEMO_CROPS = [
 ]
 
 
-def seed_users():
+def seed_users(target_engine=None, target_sessionmaker=None):
     """Seeds default demo accounts and benchmark crops for viva & evaluation."""
     demo_password = os.getenv("DEMO_PASSWORD", "Demo12345!")
+    active_engine = target_engine or engine
+    active_sm = target_sessionmaker or SessionLocal
 
     try:
         # Ensure tables exist
-        Base.metadata.create_all(bind=engine, checkfirst=True)
+        Base.metadata.create_all(bind=active_engine, checkfirst=True)
     except Exception as exc:
         print(f"[*] Notice on table creation check: {exc}")
 
     try:
-        session = SessionLocal()
+        session = active_sm()
         created_count = 0
         existing_count = 0
 

@@ -6,7 +6,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg://postgres:postgres@localhost:5432/farm_traceability"
     migration_database_url: str = ""
-    api_cors_origins: str = "http://localhost:5173"
+    api_cors_origins: str = "https://frontend-tau-three-20.vercel.app,http://localhost:5173,http://127.0.0.1:5173"
     jwt_secret: str = "agritrace_jwt_secret_key_2026_super_secure"
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 1440
@@ -15,7 +15,10 @@ class Settings(BaseSettings):
 
     @property
     def cors_origins(self) -> list[str]:
-        return [origin.strip() for origin in self.api_cors_origins.split(",") if origin.strip()]
+        raw_origins = [origin.strip().rstrip("/") for origin in self.api_cors_origins.split(",") if origin.strip()]
+        if "https://frontend-tau-three-20.vercel.app" not in raw_origins:
+            raw_origins.insert(0, "https://frontend-tau-three-20.vercel.app")
+        return list(dict.fromkeys(raw_origins))
 
     @property
     def normalized_database_url(self) -> str:
