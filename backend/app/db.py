@@ -24,11 +24,22 @@ _db_url = settings.normalized_database_url
 # statements, which are not supported by transaction mode.
 _is_transaction_pooler = ":6543/" in _db_url
 _engine_kwargs = {"pool_pre_ping": True}
-if _is_transaction_pooler:
-    _engine_kwargs["poolclass"] = NullPool
-    _engine_kwargs["connect_args"] = {"prepare_threshold": None, "sslmode": "require"}
-elif _db_url.startswith("sqlite"):
+
+if _db_url.startswith("sqlite"):
+    # SQLite alone uses check_same_thread=False
     _engine_kwargs["connect_args"] = {"check_same_thread": False}
+else:
+    # PostgreSQL / Supabase: use valid psycopg connection arguments and SSL settings
+    pg_connect_args = {}
+    if _is_transaction_pooler:
+        _engine_kwargs["poolclass"] = NullPool
+        pg_connect_args["prepare_threshold"] = None
+        pg_connect_args["sslmode"] = "require"
+    elif "supabase" in _db_url.lower() or os.getenv("VERCEL") or "sslmode=require" in _db_url.lower():
+        pg_connect_args["sslmode"] = "require"
+
+    if pg_connect_args:
+        _engine_kwargs["connect_args"] = pg_connect_args
 
 primary_engine = create_engine(_db_url, **_engine_kwargs)
 PrimarySessionLocal = sessionmaker(bind=primary_engine, autocommit=False, autoflush=False, expire_on_commit=False)
