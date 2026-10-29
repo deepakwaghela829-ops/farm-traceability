@@ -186,7 +186,7 @@ The platform includes seeded accounts for role-based evaluation and viva demonst
 | Username | Default Password | Role | Description |
 | :--- | :--- | :--- | :--- |
 | `farmer1` | `Demo12345!` | **FARMER** | Ramesh Patel (Lead Farmer, Palghar) |
-| `supplier1` | `Demo12345!` | **SUPPLIER** | Gujarat Agro Logistics (Wholesale Custody) |
+| `supplier1` | `Demo12345!` | **SUPPLIER** | Wasi Mumbai (Wholesale Custody) |
 | `retailer1` | `Demo12345!` | **RETAILER** | Apex Organic Mart (Retail Shelf Receipt) |
 | `consumer1` | `Demo12345!` | **CONSUMER** | Ananya Sharma (Consumer Provenance) |
 | `admin1` | `Demo12345!` | **ADMIN** | System Auditor & Platform Admin |

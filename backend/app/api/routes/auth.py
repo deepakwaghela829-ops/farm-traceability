@@ -177,3 +177,13 @@ def list_system_users(
         raise HTTPException(status_code=403, detail="Admin role required to view system users.")
     users = db.scalars(select(User).order_by(User.id.asc())).all()
     return [UserRead.model_validate(u) for u in users]
+
+
+@router.get("/directory", response_model=list[UserRead])
+def list_partner_directory(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> list[UserRead]:
+    """Allows authenticated supply-chain participants to resolve friendly names and partner wallet addresses."""
+    users = db.scalars(select(User).order_by(User.id.asc())).all()
+    return [UserRead.model_validate(u) for u in users]

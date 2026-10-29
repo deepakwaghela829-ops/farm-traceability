@@ -67,10 +67,33 @@ try {
     Pop-Location
 }
 
-# Verify / initialize blockchain environment file
-if (-not (Test-Path "$ProjectRoot\blockchain\.env") -and (Test-Path "$ProjectRoot\blockchain\.env.example")) {
-    Copy-Item "$ProjectRoot\blockchain\.env.example" "$ProjectRoot\blockchain\.env"
-    Write-Host "  Created blockchain\.env from template." -ForegroundColor Gray
+# Verify / initialize environment files
+if (-not (Test-Path "$ProjectRoot\blockchain\.env")) {
+    Set-Content -Path "$ProjectRoot\blockchain\.env" -Value "GANACHE_URL=http://127.0.0.1:7545`nGANACHE_CHAIN_ID=1337"
+    Write-Host "  Created blockchain\.env" -ForegroundColor Gray
+}
+
+if (-not (Test-Path "$ProjectRoot\frontend\.env")) {
+    Set-Content -Path "$ProjectRoot\frontend\.env" -Value "VITE_API_BASE_URL=http://127.0.0.1:8000"
+    Write-Host "  Created frontend\.env" -ForegroundColor Gray
+}
+
+if (-not (Test-Path "$ProjectRoot\backend\.env")) {
+    $jwtBytes = New-Object byte[] 32
+    (New-Object System.Security.Cryptography.RNGCryptoServiceProvider).GetBytes($jwtBytes)
+    $jwtHex = [System.BitConverter]::ToString($jwtBytes).Replace("-", "").ToLower()
+    $backendEnv = @"
+DATABASE_URL=sqlite:///farm_traceability.db
+GANACHE_RPC_URL=http://127.0.0.1:7545
+GANACHE_CHAIN_ID=1337
+GANACHE_CONTRACT_ADDRESS=0x59d3631c86BbE35EF041872d502F218A39FBa150
+API_CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
+JWT_SECRET=$jwtHex
+JWT_ALGORITHM=HS256
+JWT_EXPIRE_MINUTES=1440
+"@
+    Set-Content -Path "$ProjectRoot\backend\.env" -Value $backendEnv
+    Write-Host "  Created backend\.env configured for local SQLite and Ganache." -ForegroundColor Gray
 }
 
 Write-Host "`n==========================================================" -ForegroundColor Cyan

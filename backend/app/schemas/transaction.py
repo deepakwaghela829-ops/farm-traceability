@@ -4,7 +4,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class TransactionCreate(BaseModel):
-    crop_id: int = Field(gt=0)
+    crop_id: int = Field(gt=0, description="Crop identifier")
+    id_type: str = Field(default="db", description="ID namespace: 'db' (database crop_id, default) or 'blockchain' (on-chain crop_id)")
     event_type: str = Field(default="TRANSFER", min_length=1, max_length=50)
     from_address: str = Field(min_length=42, max_length=42)
     to_address: str = Field(min_length=42, max_length=42)

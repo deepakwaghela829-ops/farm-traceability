@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Path, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from sqlalchemy.orm import Session
 
 from app.ai.predictor import get_market_benchmarks, predict_price
@@ -49,17 +49,40 @@ def get_crop_benchmarks(
         )
 
 
-@router.get("/crop/{crop_id}", response_model=PricePredictionResponse)
-def get_prediction_for_crop(
-    crop_id: int = Path(..., gt=0, description="Crop ID (Blockchain or DB)"),
+@router.get("/chain/{blockchain_crop_id}", response_model=PricePredictionResponse)
+def get_prediction_for_chain_crop(
+    blockchain_crop_id: int = Path(..., gt=0, description="On-chain smart-contract Crop ID"),
     db: Session = Depends(get_db),
 ) -> PricePredictionResponse:
     try:
-        prediction = get_or_create_crop_prediction(db, crop_id)
+        prediction = get_or_create_crop_prediction(db, blockchain_crop_id, id_type="blockchain")
         if not prediction:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"No prediction found or could be generated for Crop #{crop_id}",
+                detail=f"No prediction found or could be generated for On-Chain Crop #{blockchain_crop_id}",
+            )
+        return prediction
+    except HTTPException:
+        raise
+    except Exception as err:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch crop prediction: {str(err)}",
+        )
+
+
+@router.get("/crop/{crop_id}", response_model=PricePredictionResponse)
+def get_prediction_for_crop(
+    crop_id: int = Path(..., gt=0, description="Crop ID"),
+    id_type: str = Query("db", description="ID namespace: 'db' (default) or 'blockchain'", pattern="^(db|blockchain)$"),
+    db: Session = Depends(get_db),
+) -> PricePredictionResponse:
+    try:
+        prediction = get_or_create_crop_prediction(db, crop_id, id_type=id_type)
+        if not prediction:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"No prediction found or could be generated for Crop #{crop_id} (namespace: {id_type})",
             )
         return prediction
     except HTTPException:
@@ -74,11 +97,12 @@ def get_prediction_for_crop(
 @router.post("/acknowledge/{crop_id}", response_model=AcknowledgementResponse)
 def acknowledge_forecast(
     crop_id: int = Path(..., gt=0, description="Crop ID"),
+    id_type: str = Query("db", description="ID namespace: 'db' (default) or 'blockchain'", pattern="^(db|blockchain)$"),
     payload: AcknowledgementRequest = AcknowledgementRequest(),
     db: Session = Depends(get_db),
 ) -> AcknowledgementResponse:
     try:
-        ack = record_consumer_acknowledgement(db, crop_id, payload.acknowledged)
+        ack = record_consumer_acknowledgement(db, crop_id, payload.acknowledged, id_type=id_type)
         return AcknowledgementResponse.model_validate(ack)
     except Exception as err:
         raise HTTPException(
@@ -90,10 +114,11 @@ def acknowledge_forecast(
 @router.get("/acknowledge/{crop_id}", response_model=AcknowledgementResponse | None)
 def check_acknowledgement(
     crop_id: int = Path(..., gt=0, description="Crop ID"),
+    id_type: str = Query("db", description="ID namespace: 'db' (default) or 'blockchain'", pattern="^(db|blockchain)$"),
     db: Session = Depends(get_db),
 ) -> AcknowledgementResponse | None:
     try:
-        ack = get_consumer_acknowledgement(db, crop_id)
+        ack = get_consumer_acknowledgement(db, crop_id, id_type=id_type)
         if ack:
             return AcknowledgementResponse.model_validate(ack)
         return None

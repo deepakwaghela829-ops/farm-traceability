@@ -6,19 +6,26 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 class CropCreate(BaseModel):
     farmer_id: str = Field(min_length=1, max_length=64)
-    crop_name: str = Field(min_length=1, max_length=120)
+    crop_name: str | None = Field(default=None, max_length=120, description="Optional custom product name; automatically generated from crop_type and batch_number if omitted")
     crop_type: str = Field(min_length=1, max_length=120)
     quantity: Decimal = Field(gt=0, max_digits=12, decimal_places=3)
     unit: str = Field(min_length=1, max_length=20)
     cultivation_date: date
     expected_harvest_date: date
     location: str = Field(min_length=1, max_length=200)
+    batch_number: str | None = Field(default=None, max_length=32, description="Optional batch reference (e.g. BATCH-2026-00057)")
 
     farmer_price_per_kg: Decimal | None = Field(
         default=None,
         max_digits=10,
         decimal_places=2,
         description="Confirmed farm-gate price per kg in INR",
+    )
+    supplier_margin_per_kg: Decimal | None = Field(
+        default=Decimal("15.00"),
+        max_digits=10,
+        decimal_places=2,
+        description="Supplier gross margin per kg in INR (default ₹15.00/kg)",
     )
 
     blockchain_crop_id: int | None = Field(default=None, gt=0)
@@ -38,9 +45,35 @@ class CropCreate(BaseModel):
                 raise ValueError("Farmer price must be at least ₹1.00/kg (e.g. ₹0.50/kg is not a valid price)")
         return value
 
+    @field_validator("batch_number", mode="before")
+    @classmethod
+    def validate_batch_number(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise ValueError("Batch number must be text")
+        value = value.strip()
+        if not value:
+            return None
+        if len(value) < 3 or len(value) > 32:
+            raise ValueError("Batch number must be between 3 and 32 characters")
+        import re
+        if not re.match(r"^[A-Za-z0-9_-]+$", value):
+            raise ValueError("Batch number can only contain alphanumeric characters, dashes, and underscores")
+        return value
+
+    @field_validator("crop_name", mode="before")
+    @classmethod
+    def validate_crop_name(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise ValueError("Crop name must be text")
+        clean = value.strip()
+        return clean if clean else None
+
     @field_validator(
         "farmer_id",
-        "crop_name",
         "crop_type",
         "unit",
         "location",
@@ -66,6 +99,7 @@ class CropRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     crop_id: int
+    batch_number: str | None = Field(default=None, description="Explicit batch code (e.g. BATCH-2026-00057)")
     farmer_id: str
     crop_name: str
     crop_type: str
@@ -77,10 +111,17 @@ class CropRead(BaseModel):
 
     # Pricing workflow fields (INR per kg)
     farmer_price_per_kg: Decimal | None = Field(default=None, description="Confirmed farm-gate price in INR/kg")
+    supplier_margin_per_kg: Decimal | None = Field(default=Decimal("15.00"), description="Supplier gross margin in INR/kg (default ₹15/kg)")
+    supplier_price_per_kg: Decimal | None = Field(default=None, description="Supplier sale price to retailer in INR/kg")
     retail_price_per_kg: Decimal | None = Field(default=None, description="Confirmed retail price in INR/kg")
     retailer_markup_per_kg: Decimal | None = Field(default=None, description="Retailer markup in INR/kg (default ₹30/kg)")
     retail_confirmed_by: str | None = Field(default=None, description="Username of retailer who confirmed pricing")
     retail_confirmed_at: datetime | None = Field(default=None, description="Timestamp of retail price confirmation")
+
+    # Retail receipt & active inventory status
+    retailer_received_at: datetime | None = Field(default=None, description="Timestamp of retailer receiving consignment")
+    retailer_received_by: str | None = Field(default=None, description="Retailer who received the crop")
+    is_available: bool = Field(default=True, description="Whether produce is active/available in store inventory")
 
     blockchain_crop_id: int | None
     blockchain_tx_hash: str | None
@@ -94,6 +135,22 @@ class CropRead(BaseModel):
 
     storage_mode: str | None = Field(default="persistent", description="Durability mode: persistent (Supabase) or ephemeral_fallback (/tmp)")
     storage_warning: str | None = Field(default=None, description="Explicit warning if stored in non-persistent fallback storage")
+
+
+class SupplierMarginConfirmRequest(BaseModel):
+    margin_per_kg: Decimal = Field(
+        default=Decimal("15.00"),
+        max_digits=10,
+        decimal_places=2,
+        description="Fixed supplier margin per kg in INR (default ₹15.00/kg)",
+    )
+
+    @field_validator("margin_per_kg")
+    @classmethod
+    def validate_margin(cls, value: Decimal) -> Decimal:
+        if value <= Decimal("0"):
+            raise ValueError("Supplier margin must be a positive number")
+        return value
 
 
 class RetailPriceConfirmRequest(BaseModel):
@@ -128,4 +185,3 @@ class FarmerPriceUpdateRequest(BaseModel):
         if value < Decimal("1.00"):
             raise ValueError("Farmer price must be at least ₹1.00/kg (e.g. ₹0.50/kg is not a valid price)")
         return value
-

@@ -1,13 +1,13 @@
 // blockchain.js - EVM Smart Contract & Ganache Integration for AgriTrace OS
 import { ethers } from 'ethers';
-import abi from '../blockchain/CropRegistry.abi.json';
-import deploymentInfo from '../blockchain/deployment-info.json';
+import abi from '../blockchain/CropRegistry.abi.json' with { type: 'json' };
+import deploymentInfo from '../blockchain/deployment-info.json' with { type: 'json' };
 import { API_BASE_URL } from './api.js';
 import { getToken } from './auth.js';
 
 export const LOCAL_GANACHE_RPC = 'http://127.0.0.1:7545';
 export const GANACHE_RPC =
-  window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+  typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
     ? LOCAL_GANACHE_RPC
     : `${API_BASE_URL || ''}/api/blockchain/rpc`;
 
@@ -35,7 +35,10 @@ export function getProvider() {
       if (token) {
         headers['Authorization'] = `Bearer ${token}`;
       }
-      return fetch(url, { ...options, headers });
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 2500);
+      return fetch(url, { ...options, headers, signal: controller.signal })
+        .finally(() => clearTimeout(timeoutId));
     };
 
     cachedProvider = new ethers.JsonRpcProvider(GANACHE_RPC, undefined, {
@@ -149,6 +152,9 @@ function unixTime(dateStr) {
 }
 
 export async function registerCropOnChain(cropData, signerAddress) {
+  if (!signerAddress || !signerAddress.startsWith('0x')) {
+    throw new Error(`Invalid signer address for on-chain registration: ${signerAddress}`);
+  }
   const contract = await getContractWithSigner(signerAddress);
   const tx = await contract.registerCrop(
     cropData.crop_name.trim(),
@@ -173,7 +179,48 @@ export async function registerCropOnChain(cropData, signerAddress) {
 }
 
 export async function transferCropOnChain(blockchainCropId, toAddress, toRole, signerAddress) {
+  if (!blockchainCropId || isNaN(Number(blockchainCropId))) {
+    throw new Error('Invalid blockchain crop ID. Consignment must have a valid on-chain mapping before transfer.');
+  }
+  if (!toAddress || !toAddress.startsWith('0x') || toAddress.length !== 42) {
+    throw new Error(`Invalid destination address: ${toAddress}`);
+  }
+  if (!signerAddress || !signerAddress.startsWith('0x') || signerAddress.length !== 42) {
+    throw new Error(`Invalid signer address: ${signerAddress}`);
+  }
+
   const contract = await getContractWithSigner(signerAddress);
+
+  // Pre-flight check: verify current holder on-chain
+  let currentHolder;
+  try {
+    currentHolder = await contract.getCurrentHolder(BigInt(blockchainCropId));
+  } catch (err) {
+    const msg = err.reason || err.shortMessage || err.message || '';
+    if (msg.includes('Crop not found')) {
+      throw new Error(`Crop #${blockchainCropId} was not found on the active smart contract (${CONTRACT_ADDRESS}).`);
+    }
+    throw new Error(`Failed to query on-chain holder for Crop #${blockchainCropId}: ${msg}`);
+  }
+
+  if (currentHolder.toLowerCase() !== signerAddress.toLowerCase()) {
+    throw new Error(
+      `Authorization Error: Connected wallet (${signerAddress}) is not the current on-chain holder of Crop #${blockchainCropId}. Current holder on-chain is ${currentHolder}. Only the current holder can transfer custody.`
+    );
+  }
+
+  // Pre-flight static call to capture contract revert reasons cleanly before broadcast
+  try {
+    await contract.transferCrop.staticCall(
+      BigInt(blockchainCropId),
+      toAddress.trim(),
+      toRole.trim()
+    );
+  } catch (revertErr) {
+    const reason = revertErr.reason || revertErr.shortMessage || revertErr.message;
+    throw new Error(`Smart Contract Revert: ${reason}`);
+  }
+
   const tx = await contract.transferCrop(
     BigInt(blockchainCropId),
     toAddress.trim(),
@@ -181,9 +228,19 @@ export async function transferCropOnChain(blockchainCropId, toAddress, toRole, s
   );
 
   const receipt = await tx.wait();
+
+  // Post-flight verification: Confirm that currentHolder has updated to toAddress
+  const postHolder = await contract.getCurrentHolder(BigInt(blockchainCropId));
+  if (postHolder.toLowerCase() !== toAddress.toLowerCase()) {
+    throw new Error(
+      `Transaction mined in block ${receipt.blockNumber}, but on-chain currentHolder (${postHolder}) does not match expected recipient (${toAddress}).`
+    );
+  }
+
   return {
     txHash: tx.hash,
     blockNumber: receipt.blockNumber,
+    newHolder: postHolder,
   };
 }
 

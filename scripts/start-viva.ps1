@@ -20,13 +20,15 @@ for ($attempt = 1; $attempt -le 2; $attempt++) {
             -Uri "http://127.0.0.1:7545" `
             -Method Post `
             -ContentType "application/json" `
-            -Body '{"jsonrpc":"2.0","method":"net_version","params":[],"id":1}' `
+            -Body '{"jsonrpc":"2.0","method":"eth_chainId","params":[],"id":1}' `
             -TimeoutSec 3 `
             -ErrorAction SilentlyContinue
 
         if ($res -and $res.result) {
             $ganachePass = $true
-            Write-Host "  Ganache PASS (Chain ID: $($res.result) at 127.0.0.1:7545)" -ForegroundColor Green
+            $rawId = $res.result
+            $decId = if ($rawId -match "^0x") { [Convert]::ToInt32($rawId, 16) } else { [int]$rawId }
+            Write-Host "  Ganache PASS (Chain ID: $decId at 127.0.0.1:7545)" -ForegroundColor Green
             break
         }
     }
@@ -39,11 +41,12 @@ for ($attempt = 1; $attempt -le 2; $attempt++) {
         try {
             $ganacheProc = Start-Process `
                 -FilePath "npx.cmd" `
-                -ArgumentList "ganache", "--server.port", "7545", "--chain.chainId", "1337" `
+                -ArgumentList "ganache", "--server.port", "7545", "--chain.chainId", "1337", "--chain.networkId", "1337", "--wallet.deterministic" `
+                -WorkingDirectory "$ProjectRoot\blockchain" `
                 -PassThru `
                 -WindowStyle Hidden
             $SpawnedPids += $ganacheProc.Id
-            Start-Sleep -Seconds 4
+            Start-Sleep -Seconds 6
         }
         catch {
             Write-Warning "Could not start Ganache automatically: $_"

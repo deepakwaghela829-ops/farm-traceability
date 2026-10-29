@@ -2,10 +2,39 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta http-equiv="refresh" content="0; url=./#/consumer" />
-    <title>Redirecting to Consumer Portal...</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0b0f19" />
+    <title>AgriTrace OS — Consumer Product Verification</title>
   </head>
   <body>
-    <script>window.location.replace('./#/consumer' + window.location.hash);</script>
+    <script>
+      (function() {
+        const searchParams = new URLSearchParams(window.location.search);
+        const batch = searchParams.get('batch') || searchParams.get('batch_number');
+        const chainId = searchParams.get('chain_id') || searchParams.get('chainId');
+        const cropId = searchParams.get('crop_id') || searchParams.get('cropId') || searchParams.get('id');
+
+        let targetUrl = './index.html#/consumer';
+
+        if (batch) {
+          targetUrl = './index.html#/consumer/trace/' + encodeURIComponent(batch.trim()) + '?type=batch';
+        } else if (chainId) {
+          targetUrl = './index.html#/consumer/trace/' + encodeURIComponent(chainId.trim()) + '?type=blockchain';
+        } else if (cropId) {
+          targetUrl = './index.html#/consumer/trace/' + encodeURIComponent(cropId.trim()) + '?type=db';
+        } else if (window.location.hash) {
+          targetUrl = './index.html' + window.location.hash;
+        }
+
+        window.location.replace(targetUrl);
+      })();
+    </script>
+    <noscript>
+      <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; text-align: center; padding: 48px 16px; color: #e2e8f0; background: #0b0f19; min-height: 100vh;">
+        <h2 style="font-size: 24px; margin-bottom: 12px;">AgriTrace OS Product Verification</h2>
+        <p style="color: #94a3b8; font-size: 15px; margin-bottom: 24px;">JavaScript is required to trace cryptographic provenance and agricultural supply chain records.</p>
+        <a href="./index.html#/consumer" style="display: inline-block; background: #10b981; color: #ffffff; padding: 10px 20px; border-radius: 6px; text-decoration: none; font-weight: 600;">Open Consumer Portal</a>
+      </div>
+    </noscript>
   </body>
 </html>

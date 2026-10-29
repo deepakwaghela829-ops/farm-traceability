@@ -12,37 +12,9 @@ const appState = {
   currentUser: null,
 };
 
-// Global Toast Banner
-export function showToast(message, type = 'info') {
-  const container = document.getElementById('toast-container');
-  if (!container) return;
-
-  const toast = document.createElement('div');
-  toast.className = `toast toast-${type}`;
-  
-  const iconSvg = type === 'success' ? icons.check : type === 'error' ? icons.shieldCheck : icons.info;
-
-  toast.innerHTML = `
-    <span style="display:flex;align-items:center;flex-shrink:0;">${iconSvg}</span>
-    <span style="flex:1;">${message}</span>
-    <button class="toast-close" style="background:none;border:none;color:inherit;cursor:pointer;font-size:18px;line-height:1;opacity:0.7;">&times;</button>
-  `;
-
-  toast.querySelector('.toast-close').addEventListener('click', () => {
-    toast.remove();
-  });
-
-  container.appendChild(toast);
-  setTimeout(() => {
-    if (toast.parentElement) {
-      toast.style.opacity = '0';
-      toast.style.transform = 'translateY(-10px)';
-      toast.style.transition = 'all 0.3s ease';
-      setTimeout(() => toast.remove(), 300);
-    }
-  }, 4000);
-}
-window.showToast = showToast;
+// Global Unified Notification & Modal Dialog System
+export { showToast, toast, showConfirmDialog, showPrerequisiteDialog } from './notifications.js';
+import { showToast, toast, showConfirmDialog, showPrerequisiteDialog } from './notifications.js';
 
 // Route Definition & Controller
 async function handleRouting() {
@@ -83,15 +55,76 @@ async function handleRouting() {
   // Update Sidebar Navigation based on current view / role
   updateSidebarNav(hash, user);
 
-  // Handle Hash Matching
-  if (hash.startsWith('#/consumer/trace/') || hash.startsWith('#trace-')) {
-    const rawId = hash.startsWith('#trace-')
-      ? hash.replace('#trace-', '')
-      : hash.replace('#/consumer/trace/', '');
-    const cropId = parseInt(rawId, 10);
+  // Handle direct crop/batch query string (e.g. ?batch=BATCH-2026-00017, ?crop_id=12, ?cropId=12, ?id=12, ?chain_id=7)
+  const urlSearch = new URLSearchParams(window.location.search);
+  let directTarget = null;
+  let directType = null;
+
+  if (urlSearch.get('batch') || urlSearch.get('batch_number')) {
+    directTarget = urlSearch.get('batch') || urlSearch.get('batch_number');
+    directType = 'batch';
+  } else if (urlSearch.get('chain_id') || urlSearch.get('chainId')) {
+    directTarget = urlSearch.get('chain_id') || urlSearch.get('chainId');
+    directType = 'blockchain';
+  } else if (urlSearch.get('crop_id') || urlSearch.get('cropId') || urlSearch.get('id')) {
+    directTarget = urlSearch.get('crop_id') || urlSearch.get('cropId') || urlSearch.get('id');
+    directType = 'db';
+  }
+
+  if (!directTarget && hash.includes('?')) {
+    const hashParams = new URLSearchParams(hash.split('?')[1]);
+    if (hashParams.get('batch') || hashParams.get('batch_number')) {
+      directTarget = hashParams.get('batch') || hashParams.get('batch_number');
+      directType = 'batch';
+    } else if (hashParams.get('chain_id') || hashParams.get('chainId')) {
+      directTarget = hashParams.get('chain_id') || hashParams.get('chainId');
+      directType = 'blockchain';
+    } else if (hashParams.get('crop_id') || hashParams.get('cropId') || hashParams.get('id')) {
+      directTarget = hashParams.get('crop_id') || hashParams.get('cropId') || hashParams.get('id');
+      directType = 'db';
+    }
+  }
+
+  if (directTarget && (hash.startsWith('#/consumer') || !window.location.hash || hash === '#/')) {
+    const cleanTarget = decodeURIComponent(directTarget.trim());
     showView('consumer');
     const container = document.getElementById('view-consumer');
-    await initConsumerView(container, isNaN(cropId) ? null : cropId);
+    await initConsumerView(container, cleanTarget, directType);
+    return;
+  }
+
+  // Handle Hash Matching (supports string batch numbers like BATCH-2026-00017, numeric IDs, and type hints)
+  if (hash.startsWith('#/consumer/trace/') || hash.startsWith('#trace-')) {
+    const rawPath = hash.startsWith('#trace-')
+      ? hash.replace('#trace-', '')
+      : hash.replace('#/consumer/trace/', '');
+    
+    let rawTarget = rawPath;
+    let explicitType = null;
+    if (rawPath.includes('?')) {
+      const parts = rawPath.split('?');
+      rawTarget = parts[0];
+      const hParams = new URLSearchParams(parts[1]);
+      explicitType = hParams.get('type') || hParams.get('id_type');
+    }
+
+    let cleanTarget = decodeURIComponent(rawTarget).trim();
+
+    // Check for explicit namespace prefixes (e.g. chain:7, chain-7, db:17, db-17, batch:BATCH-...)
+    if (/^chain[-:]/i.test(cleanTarget)) {
+      explicitType = 'blockchain';
+      cleanTarget = cleanTarget.replace(/^chain[-:]/i, '');
+    } else if (/^db[-:]/i.test(cleanTarget)) {
+      explicitType = 'db';
+      cleanTarget = cleanTarget.replace(/^db[-:]/i, '');
+    } else if (/^batch:/i.test(cleanTarget)) {
+      explicitType = 'batch';
+      cleanTarget = cleanTarget.replace(/^batch:/i, '');
+    }
+
+    showView('consumer');
+    const container = document.getElementById('view-consumer');
+    await initConsumerView(container, cleanTarget || null, explicitType);
     return;
   }
 

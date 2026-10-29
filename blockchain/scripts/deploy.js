@@ -49,6 +49,19 @@ async function main() {
     console.log("Synchronized ABI and deployment-info to frontend/blockchain/");
   }
 
+  // 4) Sync directly to backend/.env if present
+  const backendEnvPath = path.join(__dirname, "..", "..", "backend", ".env");
+  if (fs.existsSync(backendEnvPath)) {
+    let envContent = fs.readFileSync(backendEnvPath, "utf8");
+    if (/GANACHE_CONTRACT_ADDRESS=.*/.test(envContent)) {
+      envContent = envContent.replace(/GANACHE_CONTRACT_ADDRESS=.*/, `GANACHE_CONTRACT_ADDRESS=${address}`);
+    } else {
+      envContent += `\nGANACHE_CONTRACT_ADDRESS=${address}\n`;
+    }
+    fs.writeFileSync(backendEnvPath, envContent);
+    console.log("Synchronized contract address to backend/.env");
+  }
+
   console.log("Contract address :", address);
   console.log("Deployment tx    :", deployTx.hash);
   console.log("Block            :", receipt.blockNumber);

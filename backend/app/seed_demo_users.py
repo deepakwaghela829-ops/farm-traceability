@@ -11,7 +11,7 @@ if str(BACKEND_DIR) not in sys.path:
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from app.db import Base, SessionLocal, engine
+from app.db import Base, SessionLocal, engine, ensure_crop_pricing_columns
 from app.models.crop import Crop
 from app.models.user import User
 from app.services.auth_service import hash_password, verify_password
@@ -28,35 +28,35 @@ def get_demo_users():
             "email": "farmer1@agritrace.local",
             "role": "FARMER",
             "full_name": "Ramesh Patel (Farmer)",
-            "wallet_address": os.getenv("DEMO_FARMER_WALLET", "0xfe3b557e8fb62b89f4916b721be55ceb828dbd73"),
+            "wallet_address": os.getenv("DEMO_FARMER_WALLET", "0x90F8bf6A479f320ead074411a4B0e7944Ea8c9C1"),
         },
         {
             "username": "supplier1",
             "email": "supplier1@agritrace.local",
             "role": "SUPPLIER",
-            "full_name": "Gujarat Agro Logistics (Supplier)",
-            "wallet_address": os.getenv("DEMO_SUPPLIER_WALLET", "0xf17f52151EbEF6C7334FAD080c5704D77216b732"),
+            "full_name": "Wasi Mumbai",
+            "wallet_address": os.getenv("DEMO_SUPPLIER_WALLET", "0xFFcf8FDEE72ac11b5c542428B35EEF5769C409f0"),
         },
         {
             "username": "retailer1",
             "email": "retailer1@agritrace.local",
             "role": "RETAILER",
             "full_name": "Apex Organic Mart (Retailer)",
-            "wallet_address": os.getenv("DEMO_RETAILER_WALLET", "0xC5fdf4076b8F3A5357c5E395ab970B5B54098Fef"),
+            "wallet_address": os.getenv("DEMO_RETAILER_WALLET", "0x22d491Bde2303f2f43325b2108D26f1eAbA1e32b"),
         },
         {
             "username": "consumer1",
             "email": "consumer1@agritrace.local",
             "role": "CONSUMER",
             "full_name": "Ananya Sharma (Consumer)",
-            "wallet_address": os.getenv("DEMO_CONSUMER_WALLET", "0x821aEa9a577a9b44299B9c15c88cf3087F3b5544"),
+            "wallet_address": os.getenv("DEMO_CONSUMER_WALLET", "0xE11BA2b4D45Eaed5996Cd0823791E0C93114882d"),
         },
         {
             "username": "admin1",
             "email": "admin1@agritrace.local",
             "role": "ADMIN",
             "full_name": "System Auditor (Admin)",
-            "wallet_address": os.getenv("DEMO_ADMIN_WALLET", "0x0d1d4e623D10F9FBA5Db95830F7d3839406C6AF2"),
+            "wallet_address": os.getenv("DEMO_ADMIN_WALLET", "0xd03ea8624C8C5987235048901fB614fDcA89b117"),
         },
     ]
 
@@ -199,6 +199,8 @@ def seed_users(target_engine=None, target_sessionmaker=None, sync_passwords: boo
     active_sm = target_sessionmaker or SessionLocal
 
     try:
+        Base.metadata.create_all(bind=active_engine, checkfirst=True)
+        ensure_crop_pricing_columns(active_engine)
         session = active_sm()
         if sync_passwords:
             sync_designated_demo_users(session, demo_password=demo_password)
@@ -226,20 +228,48 @@ def seed_users(target_engine=None, target_sessionmaker=None, sync_passwords: boo
                     if user_data.get("wallet_address") and existing.wallet_address != user_data["wallet_address"]:
                         existing.wallet_address = user_data["wallet_address"]
 
-            # Seed Crops if empty
-            crop_count = session.query(Crop).count()
-            crops_seeded = 0
-            if crop_count == 0:
-                for crop_data in DEFAULT_DEMO_CROPS:
-                    crop = Crop(**crop_data)
-                    session.add(crop)
-                    crops_seeded += 1
-
             session.commit()
         session.close()
+        logger.info("User accounts verified: created=%d, existing=%d", created_count, existing_count)
     except Exception as exc:
         logger.warning("User seeding skipped or notice: %s", exc)
 
 
+def seed_demo_crops(target_engine=None, target_sessionmaker=None) -> int:
+    """
+    Explicitly seeds a small, clearly documented sample crop dataset for optional demonstration.
+    This must ONLY be invoked explicitly by command, NEVER automatically on normal application startup.
+    """
+    active_engine = target_engine or engine
+    active_sm = target_sessionmaker or SessionLocal
+    crops_seeded = 0
+
+    try:
+        session = active_sm()
+        for crop_data in DEFAULT_DEMO_CROPS:
+            existing = session.scalars(
+                select(Crop).where(Crop.crop_name == crop_data["crop_name"])
+            ).first()
+            if not existing:
+                crop = Crop(**crop_data)
+                session.add(crop)
+                crops_seeded += 1
+        session.commit()
+        session.close()
+        logger.info("Explicit demo crop seeding complete: %d sample crops added", crops_seeded)
+    except Exception as exc:
+        logger.error("Failed to seed demo crops: %s", exc)
+
+    return crops_seeded
+
+
 if __name__ == "__main__":
-    seed_users()
+    import argparse
+    parser = argparse.ArgumentParser(description="Seed AgriTrace OS users and optional demo crops.")
+    parser.add_argument("--with-crops", action="store_true", help="Explicitly seed sample demo crops (default: False)")
+    parser.add_argument("--sync-passwords", action="store_true", help="Synchronize designated demo account passwords")
+    args = parser.parse_args()
+
+    seed_users(sync_passwords=args.sync_passwords)
+    if args.with_crops:
+        seed_demo_crops()

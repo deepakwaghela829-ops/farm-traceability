@@ -167,13 +167,14 @@ def test_authorized_rpc_read_operation():
 
 def test_authorized_rpc_write_operation_passes_validation():
     farmer_token = get_auth_token("farmer1")
-    # Farmer wallet matches farmer1 profile exactly
+    res_me = client.get("/api/auth/me", headers={"Authorization": f"Bearer {farmer_token}"})
+    farmer_wallet = res_me.json()["wallet_address"]
     valid_tx_payload = {
         "jsonrpc": "2.0",
         "method": "eth_sendTransaction",
         "params": [
             {
-                "from": "0xfe3b557e8fb62b89f4916b721be55ceb828dbd73",  # farmer1 wallet
+                "from": farmer_wallet,
                 "to": "0xb524d5e1329F405f004720C5FcD4F023916c64F3",
                 "data": "0x",
             }

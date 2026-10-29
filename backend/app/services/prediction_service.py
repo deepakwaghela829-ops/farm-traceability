@@ -124,25 +124,20 @@ def generate_and_save_prediction(
 def get_or_create_crop_prediction(
     db: Session,
     crop_id: int,
+    id_type: str = "db",
 ) -> PricePredictionResponse | None:
-    # Resolve crop to find all associated IDs (database PK and blockchain ID)
-    crop_stmt = (
-        select(Crop)
-        .where((Crop.blockchain_crop_id == crop_id) | (Crop.crop_id == crop_id))
-        .order_by(Crop.crop_id.desc())
-    )
-    crop = db.scalars(crop_stmt).first()
+    if id_type == "blockchain":
+        crop = db.scalars(select(Crop).where(Crop.blockchain_crop_id == crop_id)).first()
+    else:
+        crop = db.scalars(select(Crop).where(Crop.crop_id == crop_id)).first()
 
-    target_ids = {crop_id}
-    if crop:
-        target_ids.add(crop.crop_id)
-        if crop.blockchain_crop_id:
-            target_ids.add(crop.blockchain_crop_id)
+    if not crop:
+        return None
 
-    # Check if prediction already saved for any associated crop_id
+    target_crop_id = crop.crop_id
     stmt = (
         select(CropPrediction)
-        .where(CropPrediction.crop_id.in_(list(target_ids)))
+        .where(CropPrediction.crop_id == target_crop_id)
         .order_by(CropPrediction.created_at.desc(), CropPrediction.id.desc())
     )
     existing = db.scalars(stmt).first()
@@ -168,11 +163,11 @@ def get_or_create_crop_prediction(
             production_quantity=existing.production_quantity,
         )
 
-    crop_name = crop.crop_name if crop else "Banana"
-    location = crop.location if crop else "Palghar"
-    quantity = float(crop.quantity) if crop else 500.0
-    unit = crop.unit if crop else "kg"
-    cultivation_date = crop.cultivation_date if crop else None
+    crop_name = crop.crop_name
+    location = crop.location
+    quantity = float(crop.quantity)
+    unit = crop.unit
+    cultivation_date = crop.cultivation_date
 
     # Resolve features automatically from ML dataset benchmarks
     features = resolve_features_for_crop(
@@ -184,7 +179,7 @@ def get_or_create_crop_prediction(
 
     # Generate and persist prediction
     req = PricePredictionRequest(
-        crop_id=crop_id,
+        crop_id=target_crop_id,
         crop_type=features["crop_type"],
         historical_price=features["historical_price"],
         season=features["season"],
@@ -200,9 +195,16 @@ def record_consumer_acknowledgement(
     db: Session,
     crop_id: int,
     acknowledged: bool,
+    id_type: str = "db",
 ) -> ConsumerAcknowledgement:
+    if id_type == "blockchain":
+        crop = db.scalars(select(Crop).where(Crop.blockchain_crop_id == crop_id)).first()
+        target_crop_id = crop.crop_id if crop else crop_id
+    else:
+        target_crop_id = crop_id
+
     ack = ConsumerAcknowledgement(
-        crop_id=crop_id,
+        crop_id=target_crop_id,
         acknowledged=acknowledged,
     )
     db.add(ack)
@@ -214,19 +216,17 @@ def record_consumer_acknowledgement(
 def get_consumer_acknowledgement(
     db: Session,
     crop_id: int,
+    id_type: str = "db",
 ) -> ConsumerAcknowledgement | None:
-    target_ids = {crop_id}
-    crop = db.scalars(
-        select(Crop).where((Crop.blockchain_crop_id == crop_id) | (Crop.crop_id == crop_id))
-    ).first()
-    if crop:
-        target_ids.add(crop.crop_id)
-        if crop.blockchain_crop_id:
-            target_ids.add(crop.blockchain_crop_id)
+    if id_type == "blockchain":
+        crop = db.scalars(select(Crop).where(Crop.blockchain_crop_id == crop_id)).first()
+        target_crop_id = crop.crop_id if crop else crop_id
+    else:
+        target_crop_id = crop_id
 
     stmt = (
         select(ConsumerAcknowledgement)
-        .where(ConsumerAcknowledgement.crop_id.in_(list(target_ids)))
+        .where(ConsumerAcknowledgement.crop_id == target_crop_id)
         .order_by(ConsumerAcknowledgement.acknowledged_at.desc(), ConsumerAcknowledgement.id.desc())
     )
     return db.scalars(stmt).first()

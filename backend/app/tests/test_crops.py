@@ -133,11 +133,15 @@ def test_get_crop_by_db_id_and_blockchain_id(client):
     assert by_db_resp.json()["crop_name"] == "Alphonso Mango"
     assert by_db_resp.json()["blockchain_crop_id"] == 42
 
-    # Lookup by Blockchain ID (42)
-    by_chain_resp = client.get("/api/crops/42")
+    # Lookup by Blockchain ID (42) via explicit namespace query & dedicated route
+    by_chain_resp = client.get("/api/crops/42?id_type=blockchain")
     assert by_chain_resp.status_code == 200
     assert by_chain_resp.json()["crop_name"] == "Alphonso Mango"
     assert by_chain_resp.json()["crop_id"] == 1
+
+    by_chain_route = client.get("/api/crops/chain/42")
+    assert by_chain_route.status_code == 200
+    assert by_chain_route.json()["crop_id"] == 1
 
 
 def test_crop_with_missing_blockchain_metadata(client):
@@ -167,3 +171,74 @@ def test_crop_not_found(client):
     response = client.get("/api/crops/999")
     assert response.status_code == 404
 
+
+
+def test_duplicate_crop_names_create_distinct_batches(client):
+    # Register Batch 1
+    resp1 = client.post(
+        "/api/crops",
+        json={
+            "farmer_id": "DEMO-FARMER-001",
+            "crop_name": "Mango",
+            "crop_type": "Fruit",
+            "quantity": 50,
+            "unit": "kg",
+            "cultivation_date": "2026-06-01",
+            "expected_harvest_date": "2026-10-01",
+            "location": "Ratnagiri",
+            "farmer_price_per_kg": 65.00,
+        },
+    )
+    assert resp1.status_code == 201
+    batch1 = resp1.json()
+
+    # Register Batch 2 with identical crop name, different quantity & price
+    resp2 = client.post(
+        "/api/crops",
+        json={
+            "farmer_id": "DEMO-FARMER-001",
+            "crop_name": "Mango",
+            "crop_type": "Fruit",
+            "quantity": 100,
+            "unit": "kg",
+            "cultivation_date": "2026-06-01",
+            "expected_harvest_date": "2026-10-01",
+            "location": "Ratnagiri",
+            "farmer_price_per_kg": 60.00,
+        },
+    )
+    assert resp2.status_code == 201
+    batch2 = resp2.json()
+
+    # Register Batch 3 with identical crop name, identical quantity & location
+    resp3 = client.post(
+        "/api/crops",
+        json={
+            "farmer_id": "DEMO-FARMER-001",
+            "crop_name": "Mango",
+            "crop_type": "Fruit",
+            "quantity": 50,
+            "unit": "kg",
+            "cultivation_date": "2026-06-01",
+            "expected_harvest_date": "2026-10-01",
+            "location": "Ratnagiri",
+            "farmer_price_per_kg": 70.00,
+        },
+    )
+    assert resp3.status_code == 201
+    batch3 = resp3.json()
+
+    # Assert all 3 have distinct primary keys and distinct batch numbers
+    assert batch1["crop_id"] != batch2["crop_id"]
+    assert batch2["crop_id"] != batch3["crop_id"]
+    assert batch1["crop_id"] != batch3["crop_id"]
+
+    assert batch1["batch_number"] != batch2["batch_number"]
+    assert batch2["batch_number"] != batch3["batch_number"]
+    assert batch1["batch_number"].startswith("BATCH-2026-")
+
+    # Assert retrieval by batch number endpoint
+    batch_fetch = client.get(f"/api/crops/batch/{batch2['batch_number']}")
+    assert batch_fetch.status_code == 200
+    assert batch_fetch.json()["crop_id"] == batch2["crop_id"]
+    assert float(batch_fetch.json()["quantity"]) == 100.0

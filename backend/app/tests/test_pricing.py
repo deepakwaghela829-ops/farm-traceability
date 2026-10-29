@@ -140,7 +140,9 @@ def test_confirm_retail_price_workflow():
     confirmed_crop = res_confirm.json()
     assert float(confirmed_crop["farmer_price_per_kg"]) == 50.00
     assert float(confirmed_crop["retailer_markup_per_kg"]) == 30.00
-    assert float(confirmed_crop["retail_price_per_kg"]) == 80.00
+    assert float(confirmed_crop["supplier_margin_per_kg"]) == 15.00
+    assert float(confirmed_crop["supplier_price_per_kg"]) == 65.00
+    assert float(confirmed_crop["retail_price_per_kg"]) == 95.00
     assert confirmed_crop["retail_confirmed_by"] == "retailer1"
     assert confirmed_crop["retail_confirmed_at"] is not None
 
@@ -207,3 +209,32 @@ def test_update_farmer_price():
     )
     assert res_update.status_code == 200
     assert float(res_update.json()["farmer_price_per_kg"]) == 95.00
+
+
+def test_supplier_confirm_margin_workflow():
+    create_payload = {
+        "farmer_id": "farmer1",
+        "crop_name": "Demo Crop for Supplier",
+        "crop_type": "Wheat",
+        "quantity": 1000,
+        "unit": "kg",
+        "cultivation_date": "2026-01-01",
+        "expected_harvest_date": "2026-04-01",
+        "location": "Punjab",
+        "farmer_price_per_kg": 63.49,
+    }
+    res_create = client.post("/api/crops", json=create_payload)
+    assert res_create.status_code == 201
+    crop_id = res_create.json()["crop_id"]
+
+    # Supplier confirms margin
+    res_sup = client.post(
+        f"/api/crops/{crop_id}/confirm-supplier-margin",
+        headers={"Authorization": f"Bearer {supplier_token}"},
+        json={"margin_per_kg": 15.00},
+    )
+    assert res_sup.status_code == 200
+    data = res_sup.json()
+    assert float(data["farmer_price_per_kg"]) == 63.49
+    assert float(data["supplier_margin_per_kg"]) == 15.00
+    assert float(data["supplier_price_per_kg"]) == 78.49

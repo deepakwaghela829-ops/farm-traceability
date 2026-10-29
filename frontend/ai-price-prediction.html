@@ -2,10 +2,372 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta http-equiv="refresh" content="0; url=./#/farmer" />
-    <title>Redirecting to Farmer Portal...</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0b0f19" />
+    <title>AI Price Prediction Engine — AgriTrace OS</title>
+    <link rel="stylesheet" href="/css/style.css" />
+    <style>
+      .ai-header {
+        background: var(--bg-surface);
+        border-bottom: 1px solid var(--border-color);
+        padding: 16px 24px;
+        position: sticky;
+        top: 0;
+        z-index: 100;
+      }
+      .ai-header-inner {
+        max-width: 1200px;
+        margin: 0 auto;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 16px;
+        flex-wrap: wrap;
+      }
+      .ai-container {
+        max-width: 1200px;
+        margin: 32px auto;
+        padding: 0 20px;
+      }
+      .metric-badge {
+        background: rgba(255, 255, 255, 0.04);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-md);
+        padding: 14px 16px;
+        text-align: center;
+      }
+      .metric-val {
+        font-size: 20px;
+        font-weight: 800;
+        color: #ffffff;
+        margin-top: 4px;
+      }
+      .metric-label {
+        font-size: 11px;
+        text-transform: uppercase;
+        color: var(--text-dim);
+        font-weight: 700;
+        letter-spacing: 0.05em;
+      }
+    </style>
   </head>
   <body>
-    <script>window.location.replace('./#/farmer');</script>
+    <!-- Top Navigation Header -->
+    <header class="ai-header">
+      <div class="ai-header-inner">
+        <a href="/#/consumer" class="brand" style="text-decoration: none;">
+          <div class="brand-icon-box">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10Z"/>
+              <path d="M2 21c0-3 1.85-5.36 5.08-6C9.5 14.52 12 13 13 12"/>
+            </svg>
+          </div>
+          <div class="brand-title">
+            AgriTrace <span class="brand-os">OS</span>
+          </div>
+        </a>
+
+        <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+          <a href="/#/farmer" class="btn btn-secondary btn-sm">Farmer Portal</a>
+          <a href="/#/supplier" class="btn btn-secondary btn-sm">Supplier Portal</a>
+          <a href="/#/retailer" class="btn btn-secondary btn-sm">Retailer Portal</a>
+          <a href="/#/consumer" class="btn btn-primary btn-sm">Public Consumer View</a>
+        </div>
+      </div>
+    </header>
+
+    <main class="ai-container">
+      <!-- Title & Intro -->
+      <div style="margin-bottom: 28px;">
+        <div style="display: inline-flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+          <span class="badge badge-success">Machine Learning Pipeline</span>
+          <span class="badge badge-info">Random Forest Regressor</span>
+          <span class="badge badge-warning">R² = 0.9635</span>
+        </div>
+        <h1 style="font-size: 32px; font-weight: 800; letter-spacing: -0.5px; margin-bottom: 8px;">
+          AI Agricultural Price Prediction Engine
+        </h1>
+        <p style="color: var(--text-muted); font-size: 15px; max-width: 800px; line-height: 1.5; margin: 0;">
+          Predict fair farm-gate and market clearing rates for agricultural produce using multi-market APMC benchmarks, historical price elasticity, seasonal climate indices, and supply-demand ratios.
+        </p>
+      </div>
+
+      <!-- Main Layout Grid -->
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 24px;">
+        <!-- Left Column: Input Form -->
+        <div class="card" style="margin-bottom: 0;">
+          <div class="card-header">
+            <div>
+              <h3>Crop & Market Parameters</h3>
+              <p>Configure agricultural features for ML regressor inference</p>
+            </div>
+          </div>
+
+          <form id="standalone-pricing-form">
+            <div class="form-row-2">
+              <div class="form-group">
+                <label class="form-label" for="input-crop-type">Crop Type <span style="color:var(--danger)">*</span></label>
+                <select id="input-crop-type" class="form-control" required>
+                  <option value="Banana">Banana</option>
+                  <option value="Tomato" selected>Tomato</option>
+                  <option value="Onion">Onion</option>
+                  <option value="Potato">Potato</option>
+                  <option value="Mango">Mango</option>
+                  <option value="Cabbage">Cabbage</option>
+                  <option value="Cauliflower">Cauliflower</option>
+                  <option value="Grapes">Grapes</option>
+                  <option value="Rice">Rice</option>
+                  <option value="Wheat">Wheat</option>
+                </select>
+              </div>
+
+              <div class="form-group">
+                <label class="form-label" for="input-season">Season <span style="color:var(--danger)">*</span></label>
+                <select id="input-season" class="form-control" required>
+                  <option value="Monsoon" selected>Monsoon (Kharif)</option>
+                  <option value="Winter">Winter (Rabi)</option>
+                  <option value="Summer">Summer (Zaid)</option>
+                  <option value="Whole Year">Whole Year</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="form-row-2">
+              <div class="form-group">
+                <label class="form-label" for="input-location">Location / District <span style="color:var(--danger)">*</span></label>
+                <input type="text" id="input-location" class="form-control" value="Nashik" required />
+              </div>
+
+              <div class="form-group">
+                <label class="form-label" for="input-history">
+                  Historical APMC Mandi Price (₹ / quintal) <span style="color:var(--danger)">*</span>
+                </label>
+                <div style="position: relative;">
+                  <input type="number" id="input-history" class="form-control" value="3200" step="10" required />
+                  <span id="benchmark-status" style="position: absolute; right: 10px; top: 12px; font-size: 11px; color: #34d399;">
+                    ✓ Live Benchmark
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div class="form-row-2">
+              <div class="form-group">
+                <label class="form-label" for="input-demand">
+                  Market Demand Factor (0.1 - 2.0) <span style="color:var(--danger)">*</span>
+                </label>
+                <input type="number" id="input-demand" class="form-control" value="0.8" step="0.05" min="0.1" max="2.0" required />
+                <span style="font-size: 11px; color: var(--text-dim); display: block; margin-top: 4px;">
+                  1.0 = baseline demand, &gt;1.0 = high demand
+                </span>
+              </div>
+
+              <div class="form-group">
+                <label class="form-label" for="input-quantity">
+                  Batch Quantity (kg) <span style="color:var(--danger)">*</span>
+                </label>
+                <input type="number" id="input-quantity" class="form-control" value="500" min="1" step="any" required />
+              </div>
+            </div>
+
+            <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px;">
+              <button type="button" id="btn-reset-benchmarks" class="btn btn-secondary">
+                Reset to Benchmarks
+              </button>
+              <button type="submit" id="btn-submit-prediction" class="btn btn-primary" style="padding: 10px 24px;">
+                Calculate Forecast
+              </button>
+            </div>
+          </form>
+        </div>
+
+        <!-- Right Column: Forecast & Evaluation Result -->
+        <div style="display: flex; flex-direction: column; gap: 20px;">
+          <!-- Primary Prediction Output Card -->
+          <div class="card" style="margin-bottom: 0; border-color: var(--primary-border); background: var(--bg-surface);">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+              <span style="font-size: 12px; font-weight: 700; text-transform: uppercase; color: var(--text-muted); letter-spacing: 0.05em;">
+                Predicted Fair Market Value
+              </span>
+              <span id="pred-model-badge" class="badge badge-success">Random Forest ML</span>
+            </div>
+
+            <div style="display: flex; align-items: baseline; gap: 8px; margin: 8px 0;">
+              <span id="pred-price-kg" style="font-size: 42px; font-weight: 800; color: #34d399;">
+                ₹34.80
+              </span>
+              <span style="font-size: 16px; color: var(--text-muted); font-weight: 500;">/ kg</span>
+            </div>
+
+            <div style="background: rgba(255,255,255,0.03); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 14px; margin-bottom: 16px; font-size: 13px;">
+              <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
+                <span style="color: var(--text-muted);">Equivalent Mandi Rate:</span>
+                <strong id="pred-price-quintal" style="color: #ffffff;">₹3,480.00 / quintal</strong>
+              </div>
+              <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
+                <span style="color: var(--text-muted);">Recommended Farm-Gate:</span>
+                <strong id="pred-farmer-rate" style="color: #34d399;">₹34.80 / kg</strong>
+              </div>
+              <div style="display: flex; justify-content: space-between; padding-top: 6px; border-top: 1px solid var(--border-color);">
+                <span style="color: var(--text-muted);">Suggested Retail Shelf Price:</span>
+                <strong id="pred-retail-rate" style="color: #60a5fa;">₹64.80 / kg (+ ₹30 markup)</strong>
+              </div>
+            </div>
+
+            <p style="font-size: 12px; color: var(--text-dim); line-height: 1.5; margin: 0;">
+              * Note: Forecast is calculated using trained non-linear Random Forest multi-estimator regression. Market participants maintain full liberty to negotiate final transactions.
+            </p>
+          </div>
+
+          <!-- Model Evaluation Metrics Card -->
+          <div class="card" style="margin-bottom: 0;">
+            <div class="card-header" style="padding-bottom: 12px;">
+              <div>
+                <h4 style="font-size: 15px; margin: 0;">Model Performance & Benchmark Metrics</h4>
+                <p style="font-size: 12px; margin: 0; color: var(--text-muted);">Evaluated on holdout APMC test dataset</p>
+              </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;">
+              <div class="metric-badge">
+                <div class="metric-label">Holdout R²</div>
+                <div class="metric-val" style="color: #34d399;">0.9635</div>
+                <div style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">96.35% variance</div>
+              </div>
+              <div class="metric-badge">
+                <div class="metric-label">MAE / kg</div>
+                <div class="metric-val">±₹1.84</div>
+                <div style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">±₹183.80 / qtl</div>
+              </div>
+              <div class="metric-badge">
+                <div class="metric-label">RMSE / kg</div>
+                <div class="metric-val">±₹3.00</div>
+                <div style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">±₹300.36 / qtl</div>
+              </div>
+            </div>
+
+            <div style="margin-top: 14px; font-size: 11px; color: var(--text-dim); display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
+              <span>Algorithm: <strong>Random Forest Regressor</strong></span>
+              <span>Holdout Test Size: <strong>52 records</strong></span>
+              <span>Framework: <strong>Scikit-Learn 1.6</strong></span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <footer id="app-footer" style="margin-top: 48px;">
+      <div class="footer-inner">
+        <div><strong>AgriTrace OS</strong> — Transparent Agricultural Supply Chain & Provenance Platform</div>
+        <div>FastAPI &bull; Random Forest ML &bull; Ganache EVM &bull; SQLite / PostgreSQL</div>
+      </div>
+    </footer>
+
+    <script type="module">
+      import { toast } from '/js/notifications.js';
+
+      const API_BASE = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+        ? 'http://127.0.0.1:8000'
+        : '';
+
+      const form = document.getElementById('standalone-pricing-form');
+      const cropSelect = document.getElementById('input-crop-type');
+      const seasonSelect = document.getElementById('input-season');
+      const locationInput = document.getElementById('input-location');
+      const historyInput = document.getElementById('input-history');
+      const demandInput = document.getElementById('input-demand');
+      const quantityInput = document.getElementById('input-quantity');
+      const benchmarkStatus = document.getElementById('benchmark-status');
+      const resetBtn = document.getElementById('btn-reset-benchmarks');
+      const submitBtn = document.getElementById('btn-submit-prediction');
+
+      const priceKgEl = document.getElementById('pred-price-kg');
+      const priceQuintalEl = document.getElementById('pred-price-quintal');
+      const farmerRateEl = document.getElementById('pred-farmer-rate');
+      const retailRateEl = document.getElementById('pred-retail-rate');
+
+      async function fetchBenchmark(cropName) {
+        benchmarkStatus.innerText = 'Fetching...';
+        benchmarkStatus.style.color = 'var(--text-muted)';
+        try {
+          const res = await fetch(`${API_BASE}/api/prediction/benchmarks/${encodeURIComponent(cropName)}`);
+          if (res.ok) {
+            const data = await res.json();
+            if (data.historical_price) {
+              historyInput.value = data.historical_price;
+            }
+            if (data.demand) {
+              demandInput.value = data.demand;
+            }
+            if (data.location) {
+              locationInput.value = data.location;
+            }
+            if (data.season) {
+              seasonSelect.value = data.season;
+            }
+            benchmarkStatus.innerText = '✓ Live Benchmark';
+            benchmarkStatus.style.color = '#34d399';
+            return;
+          }
+        } catch (err) {
+          console.warn('Could not fetch remote benchmark:', err);
+        }
+        benchmarkStatus.innerText = '• Default Benchmark';
+        benchmarkStatus.style.color = '#f59e0b';
+      }
+
+      cropSelect.addEventListener('change', () => {
+        fetchBenchmark(cropSelect.value);
+      });
+
+      resetBtn.addEventListener('click', () => {
+        fetchBenchmark(cropSelect.value);
+      });
+
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        submitBtn.disabled = true;
+        submitBtn.innerText = 'Calculating...';
+
+        const payload = {
+          crop_type: cropSelect.value,
+          season: seasonSelect.value,
+          location: locationInput.value.trim(),
+          historical_price: parseFloat(historyInput.value),
+          demand: parseFloat(demandInput.value),
+          production_quantity: parseFloat(quantityInput.value),
+        };
+
+        try {
+          const res = await fetch(`${API_BASE}/api/prediction/price`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          });
+
+          if (!res.ok) {
+            throw new Error(`API error: ${res.statusText}`);
+          }
+
+          const data = await res.json();
+          const priceKg = Number(data.predicted_price);
+          const priceQuintal = data.predicted_price_per_quintal || (priceKg * 100);
+
+          priceKgEl.innerText = `₹${priceKg.toFixed(2)}`;
+          priceQuintalEl.innerText = `₹${priceQuintal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} / quintal`;
+          farmerRateEl.innerText = `₹${priceKg.toFixed(2)} / kg`;
+          retailRateEl.innerText = `₹${(priceKg + 30).toFixed(2)} / kg (+ ₹30 markup)`;
+          toast.success(`Predicted farm-gate price: ₹${priceKg.toFixed(2)}/kg for ${cropSelect.value}!`, 'Forecast Ready');
+        } catch (err) {
+          toast.error('Failed to calculate forecast: ' + err.message, 'Forecast Error');
+        } finally {
+          submitBtn.disabled = false;
+          submitBtn.innerText = 'Calculate Forecast';
+        }
+      });
+
+      // Initial benchmark fetch
+      fetchBenchmark(cropSelect.value);
+    </script>
   </body>
 </html>

@@ -109,9 +109,10 @@ def test_transactions_retrieval_by_db_and_blockchain_id(client):
     crop_resp = client.post("/api/crops", json=crop_payload)
     assert crop_resp.status_code == 201
 
-    # 2. Record a transaction with on-chain ID 42
+    # 2. Record a transaction specifying explicit on-chain ID 42 namespace
     tx_payload = {
         "crop_id": 42,
+        "id_type": "blockchain",
         "event_type": "TRANSFER",
         "from_address": "0xa5c5A997d004B8D3294E48b8494996B703E9513E",
         "to_address": "0x89205A3A3b2A69De6Dbf7f01ED13B2108B2c43e7",
@@ -130,10 +131,14 @@ def test_transactions_retrieval_by_db_and_blockchain_id(client):
     assert len(db_results) == 1
     assert db_results[0]["transaction_hash"] == tx_payload["transaction_hash"]
 
-    # 4. Verify retrieval by Blockchain ID (42)
-    get_by_chain = client.get("/api/transactions/42")
+    # 4. Verify retrieval by Blockchain ID (42) via explicit namespace query & dedicated route
+    get_by_chain = client.get("/api/transactions/42?id_type=blockchain")
     assert get_by_chain.status_code == 200
     chain_results = get_by_chain.json()
     assert len(chain_results) == 1
     assert chain_results[0]["transaction_hash"] == tx_payload["transaction_hash"]
+
+    get_by_chain_route = client.get("/api/transactions/chain/42")
+    assert get_by_chain_route.status_code == 200
+    assert len(get_by_chain_route.json()) == 1
 

@@ -2,11 +2,11 @@
 import { resolveCropProvenance, renderTraceabilityHTML } from './traceability.js';
 import { icons } from './icons.js';
 
-export async function initConsumerView(container, directCropId = null) {
-  renderConsumerShell(container, directCropId);
+export async function initConsumerView(container, directCropId = null, directIdType = null) {
+  renderConsumerShell(container, directCropId, directIdType);
 }
 
-function renderConsumerShell(container, initialCropId = null) {
+function renderConsumerShell(container, initialCropId = null, initialIdType = null) {
   container.innerHTML = `
     <!-- Consumer Welcome & Search Shell (Section 14) -->
     <div style="max-width: 860px; margin: 20px auto 40px;">
@@ -27,14 +27,13 @@ function renderConsumerShell(container, initialCropId = null) {
         <form id="consumer-search-form" style="display: flex; gap: 12px; flex-wrap: wrap;">
           <div style="flex: 1; min-width: 240px; position: relative;">
             <input
-              type="number"
+              type="text"
               id="consumer-crop-input"
               class="form-control"
-              placeholder="Enter Crop ID (e.g. 1)"
+              placeholder="Enter Batch Code (e.g. BATCH-2026-00017) or Crop ID (e.g. 1)"
               value="${initialCropId || ''}"
-              style="height: 50px; font-size: 16px; padding: 12px 18px;"
+              style="height: 50px; font-size: 15px; padding: 12px 18px;"
               required
-              min="1"
             />
           </div>
           <button type="submit" id="consumer-btn-verify" class="btn btn-primary" style="height: 50px; padding: 12px 28px; font-size: 16px;">
@@ -44,10 +43,10 @@ function renderConsumerShell(container, initialCropId = null) {
 
         <div style="display: flex; gap: 10px; align-items: center; margin-top: 14px; font-size: 13px; color: var(--text-muted); flex-wrap: wrap;">
           <span style="font-weight: 600;">Sample Batches:</span>
+          <a href="#/consumer/trace/BATCH-2026-00017" class="quick-link btn btn-secondary btn-sm" style="padding: 4px 10px; font-size: 12px;">Mango BATCH-00017</a>
           <a href="#/consumer/trace/1" class="quick-link btn btn-secondary btn-sm" style="padding: 4px 10px; font-size: 12px;">Crop #1</a>
           <a href="#/consumer/trace/2" class="quick-link btn btn-secondary btn-sm" style="padding: 4px 10px; font-size: 12px;">Crop #2</a>
-          <a href="#/consumer/trace/3" class="quick-link btn btn-secondary btn-sm" style="padding: 4px 10px; font-size: 12px;">Crop #3</a>
-          <span style="color: var(--text-dim); margin-left: auto;">Supported by Ganache Blockchain & FastAPI</span>
+          <span style="color: var(--text-dim); margin-left: auto;">Supported by Ganache Blockchain & AgriTrace Ledger</span>
         </div>
       </div>
 
@@ -76,28 +75,29 @@ function renderConsumerShell(container, initialCropId = null) {
     e.preventDefault();
     const id = input.value.trim();
     if (id) {
-      window.location.hash = `#/consumer/trace/${id}`;
+      window.location.hash = `#/consumer/trace/${encodeURIComponent(id)}`;
       performVerification(id, output);
     }
   });
 
   if (initialCropId) {
-    performVerification(initialCropId, output);
+    performVerification(initialCropId, output, initialIdType);
   }
 }
 
-async function performVerification(cropId, outputContainer) {
+async function performVerification(cropId, outputContainer, idType = null) {
+  const displayLabel = String(cropId).startsWith('BATCH-') ? cropId : `Crop #${cropId}`;
   outputContainer.innerHTML = `
     <div class="card" style="text-align: center; padding: 48px 16px;">
       <div style="display: inline-block; width: 40px; height: 40px; border: 3px solid var(--primary-border); border-top-color: var(--primary); border-radius: 50%; animation: spin 0.8s linear infinite; margin-bottom: 16px;"></div>
       <h3 style="font-size: 18px; margin-bottom: 6px;">Verifying Origin & Provenance...</h3>
-      <p style="color: var(--text-muted); font-size: 14px;">Querying agricultural ledger and smart contract for Crop #${cropId}...</p>
+      <p style="color: var(--text-muted); font-size: 14px;">Querying agricultural ledger and smart contract for ${displayLabel}...</p>
     </div>
     <style>@keyframes spin { to { transform: rotate(360deg); } }</style>
   `;
 
   try {
-    const result = await resolveCropProvenance(cropId);
+    const result = await resolveCropProvenance(cropId, idType);
     outputContainer.innerHTML = renderTraceabilityHTML(result);
   } catch (err) {
     outputContainer.innerHTML = `
